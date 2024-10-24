@@ -1,10 +1,10 @@
+# global_parameters.py
+
 class GlobalParameters:
-    """Holds global parameters for the simulation."""
-    
-    def __init__(self, inter_arrival_time, triage_time, sdec_capacity, simulation_time, triage_nurse_capacity, random_seed):
-        self.inter_arrival_time = inter_arrival_time
-        self.triage_time = triage_time
-        self.sdec_capacity = sdec_capacity
+    """Contains constants and parameters used across the simulation (e.g., arrival rates, service times)."""
+    def __init__(self, mean_patient_arrival_time, mean_assessment_time, admission_probability, simulation_time, amu_bed_rate):
+        self.mean_patient_arrival_time = mean_patient_arrival_time
+        self.mean_assessment_time = mean_assessment_time
+        self.admission_probability = admission_probability
         self.simulation_time = simulation_time
-        self.triage_nurse_capacity = triage_nurse_capacity
-        self.random_seed = random_seed  # For reproducibility
+        self.amu_bed_rate = amu_bed_rate
