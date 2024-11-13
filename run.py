@@ -16,10 +16,10 @@ if __name__ == "__main__":
         mean_initial_medical_assessment_time = 60,
         mean_consultant_assessment_time = 20, 
         admission_probability=0.25,
-        simulation_time=1440,
+        simulation_time= 20160,
         amu_bed_rate=0.1)
 
     trial = Trial(global_params)
-    total_runs = 5
+    total_runs = 1
     burn_in_time = 100 # burn in to prevent initiation bias
-    trial.run(total_runs, burn_in_time = 100)
+    trial.run(total_runs, burn_in_time = 10080)

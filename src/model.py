@@ -12,7 +12,7 @@ class Model:
         self.run_number = run_number
         self.patient_counter = 0
         self.run_results_df = pd.DataFrame(columns=[
-            "Patient ID", "Arrival Time", "Day of Arrival", "Time of Arrival", "ED Assessment Time", "Time at End of ED Assessment", "Referral Time", "Time End Referral", "Initial Medical Assessment Time",
+            "Patient ID", "Arrival Time", "Day of Arrival", "Time of Arrival", "Triage Time", "Time End Triage", "ED Assessment Time", "Time at End of ED Assessment", "Referral Time", "Time End Referral", "Initial Medical Assessment Time",
             "Time End Medical Assessment", "Consultant Assessment Time", "Time End Consultant Assessment", "Disposition", "Time in System"
         ])
 
@@ -37,24 +37,52 @@ class Model:
 
             patient = Patient(self.patient_counter, arrival_time, hour_of_arrival, day_of_arrival)
 
-            self.run_results_df.loc[patient.id] = [patient.arrival_time, patient.day_of_arrival, patient.hour_of_arrival, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, '', 0.0]
+            # initialise results table
+
+            self.run_results_df.loc[patient.id] = [patient.arrival_time, patient.day_of_arrival, patient.hour_of_arrival, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, '', 0.0]
             print(f"Patient {patient.id} arrives at {patient.arrival_time}")
+            
+            # start triage process
+            
+            self.env.process(self.triage(patient))
+            ED_inter_arrival_time = random.expovariate(1.0 / self.global_params.mean_patient_arrival_time) 
+            yield self.env.timeout(ED_inter_arrival_time)
+
+    def triage(self, patient):
+        """Simulate triage."""
+        with self.triage_nurse.request() as req:
+            yield req  # Wait until a doctor is available
+            triage_assessment_time = random.expovariate(1.0/self.global_params.mean_triage_assessment_time)
+            yield self.env.timeout(triage_assessment_time)
+
+            # Record the triage time in the results # 
+            self.run_results_df.at[patient.id, "Triage Time"] = triage_assessment_time
+            
+            # Calculate and record the total time from arrival to the end of triage
+            time_at_end_of_triage = self.env.now - patient.arrival_time
+            self.run_results_df.at[patient.id, "Time End Triage"] = time_at_end_of_triage
+
+
+            # Proceed to ED assessment after triage
             self.env.process(self.ed_assessment(patient))
-            mean_patient_arrival_time = random.expovariate(1.0 / self.global_params.mean_patient_arrival_time)  # Example mean inter-arrival time of 5
-            yield self.env.timeout(mean_patient_arrival_time)
 
     def ed_assessment(self, patient):
-        """Simulate ED assessment and referral combined process."""
+        """Simulate ED assessment."""
         with self.ed_doctor.request() as req:
             yield req  # Wait until a doctor is available
             ed_assessment_time = random.expovariate(1.0 / self.global_params.mean_ed_assessment_time)
             yield self.env.timeout(ed_assessment_time)
+            
+            # Record ed assessment time in the results # 
+
             self.run_results_df.at[patient.id, "ED Assessment Time"] = ed_assessment_time
             patient.ed_assessment_time = ed_assessment_time
 
              # Record time from arrival to end of assessment
             total_time_at_end_of_assessment = self.env.now - patient.arrival_time
             self.run_results_df.at[patient.id, "Time at End of ED Assessment"] = total_time_at_end_of_assessment
+
+            # Proceed to referral
 
             print(f"Patient {patient.id} completes ED assessment at {self.env.now}")
             self.env.process(self.refer_to_medicine(patient))

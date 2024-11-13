@@ -19,16 +19,18 @@ class Trial:
             # Run the burn-in period without recording results
             model.env.run(until = burn_in_time) 
 
-            # Reset counters and clear results DataFrame to discard burn-in data
-            model.patient_counter = 0
+            # Only clear the DataFrame, not the environment or patient counters
             model.run_results_df.drop(model.run_results_df.index, inplace=True)
-
-             # Run the main simulation and collect results
-            model.run()  # Run the model
+    
+            # Continue running the simulation after burn-in
+            remaining_time = model.global_params.simulation_time - burn_in_time
+            print(f"Collecting results for {remaining_time} minutes after burn-in.")
+            model.env.run(until= model.env.now + remaining_time)
 
             # Concatenate the results of each run to the global results DataFrame
             # Reset index to make "Patient ID" a column again
             model.run_results_df['Run Number'] = i + 1
+
             self.agg_results_df = pd.concat([self.agg_results_df, model.run_results_df], ignore_index= True)
         # Move 'Run Number' to the first column for cleaner presentation
         cols = ["Run Number"] + [col for col in self.agg_results_df.columns if col != "Run Number"]
