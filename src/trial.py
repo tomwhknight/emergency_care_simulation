@@ -8,15 +8,28 @@ class Trial:
         self.global_params = global_params
         self.agg_results_df = pd.DataFrame()  # Initialize an empty DataFrame for all run results
 
-    def run(self, run_number):
+    def run(self, run_number, burn_in_time = 0):
         """Run the trial for the specified number of runs."""
         for i in range(run_number):
-            print(f"Starting simulation run {i + 1}...")
+            print(f"Starting simulation run {i + 1} with a burn-in period of {burn_in_time}")
+
+             # Initialize the model for each run
             model = Model(self.global_params, run_number=i+1)  # Create a new instance of the Model class with run_number
-            model.run()  # Run the model
             
+            # Run the burn-in period without recording results
+            model.env.run(until = burn_in_time) 
+
+            # Reset counters and clear results DataFrame to discard burn-in data
+            model.patient_counter = 0
+            model.run_results_df.drop(model.run_results_df.index, inplace=True)
+
+             # Run the main simulation and collect results
+            model.run()  # Run the model
+
             # Concatenate the results of each run to the global results DataFrame
-            self.agg_results_df = pd.concat([self.agg_results_df, model.run_results_df])
+            # Reset index to make "Patient ID" a column again
+            model.run_results_df['Run Number'] = i + 1
+            self.agg_results_df = pd.concat([self.agg_results_df, model.run_results_df], ignore_index= True)
         # Move 'Run Number' to the first column for cleaner presentation
         cols = ["Run Number"] + [col for col in self.agg_results_df.columns if col != "Run Number"]
         self.agg_results_df = self.agg_results_df[cols]

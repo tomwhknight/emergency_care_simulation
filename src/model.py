@@ -15,13 +15,15 @@ class Model:
             "Patient ID", "Arrival Time", "Day of Arrival", "Time of Arrival", "ED Assessment Time", "Time at End of ED Assessment", "Referral Time", "Time End Referral", "Initial Medical Assessment Time",
             "Time End Medical Assessment", "Consultant Assessment Time", "Time End Consultant Assessment", "Disposition", "Time in System"
         ])
+
         self.run_results_df.set_index("Patient ID", inplace=True)
 
         # Create resources
 
-        self.ed_doctor = simpy.Resource(self.env, capacity=10)
-        self.medical_staff = simpy.Resource(self.env, capacity=5)
-        self.consultant = simpy.Resource(self.env, capacity=2)
+        self.triage_nurse = simpy.Resource(self.env, capacity=self.global_params.triage_nurse_capacity)
+        self.ed_doctor = simpy.Resource(self.env, capacity=self.global_params.ed_doctor_capacity)
+        self.medical_doctor = simpy.Resource(self.env, capacity=self.global_params.medical_doctor_capacity)
+        self.consultant = simpy.Resource(self.env, capacity=self.global_params.consultant_capacity)
 
     def generate_patient_arrivals(self):
         """Generate patient arrivals based on inter-arrival times."""
@@ -77,7 +79,7 @@ class Model:
 
     def initial_medical_assessment(self, patient):
         """Simulate initial medical assessment."""
-        with self.medical_staff.request() as req:
+        with self.medical_doctor.request() as req:
             yield req  # Wait until medical staff is available
             med_assessment_time = random.expovariate(1.0 / self.global_params.mean_initial_medical_assessment_time)
             yield self.env.timeout(med_assessment_time)
