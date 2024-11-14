@@ -8,11 +8,14 @@ class GlobalParameters:
                  medical_doctor_capacity, 
                  consultant_capacity, 
                  mean_triage_assessment_time, 
+                 stdev_triage_assessment_time,
                  mean_ed_assessment_time, 
-                 mean_medical_referral, 
+                 stdev_ed_assessment_time,
+                 mean_medical_referral,
                  mean_initial_medical_assessment_time, 
                  mean_consultant_assessment_time, 
                  admission_probability, 
+                 burn_in_time,
                  simulation_time, 
                  amu_bed_rate):
         
@@ -27,14 +30,21 @@ class GlobalParameters:
         self.medical_doctor_capacity = medical_doctor_capacity
         self.consultant_capacity = consultant_capacity
     
-        # mean assessment times
+        # assessment times
         
         self.mean_triage_assessment_time = mean_triage_assessment_time 
-        self.ed_doctor_capacity = ed_doctor_capacity
+        self.stdev_triage_assessment_time = stdev_triage_assessment_time
+
         self.mean_ed_assessment_time = mean_ed_assessment_time
+        self.stdev_ed_assessment_time = stdev_ed_assessment_time
+
         self.mean_medical_referral = mean_medical_referral
         self.mean_initial_medical_assessment_time = mean_initial_medical_assessment_time
         self.mean_consultant_assessment_time = mean_consultant_assessment_time
         self.admission_probability = admission_probability
-        self.simulation_time = simulation_time
         self.amu_bed_rate = amu_bed_rate
+
+        # sim duration
+
+        self.burn_in_time = burn_in_time
+        self.simulation_time = simulation_time
