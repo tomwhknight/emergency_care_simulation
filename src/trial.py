@@ -21,9 +21,6 @@ class Trial:
             # Run the model
             model.run()
 
-            # Print the columns of run_results_df before concatenation
-            print(f"Columns in model.run_results_df for run {i + 1}: {model.run_results_df.columns}")
-
             # Reset the index in model's run_results_df to make Patient ID a column
             model.run_results_df_reset = model.run_results_df.reset_index()
 

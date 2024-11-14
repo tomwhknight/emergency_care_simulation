@@ -71,7 +71,6 @@ class Model:
             self.record_result(patient.id, "Hour of Arrival", hour_of_arrival)
         
             # start triage process
-            
             self.env.process(self.triage(patient))
             print(f"Patient {patient.id} arrives at {arrival_time}")
 

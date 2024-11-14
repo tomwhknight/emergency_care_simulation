@@ -11,8 +11,8 @@ if __name__ == "__main__":
         medical_doctor_capacity = 4,
         consultant_capacity = 2, 
 
-        mean_triage_assessment_time = 15,
-        stdev_triage_assessment_time = 7,
+        mean_triage_assessment_time = 60,
+        stdev_triage_assessment_time = 5,
         
         mean_ed_assessment_time= 60,
         stdev_ed_assessment_time = 25, 
