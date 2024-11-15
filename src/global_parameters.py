@@ -14,10 +14,12 @@ class GlobalParameters:
                  mean_medical_referral,
                  mean_initial_medical_assessment_time, 
                  mean_consultant_assessment_time, 
-                 admission_probability, 
+                 admission_probability,
+                 amu_bed_capacity,
+                 initial_amu_beds,
+                 amu_bed_generation_rate,     
                  burn_in_time,
-                 simulation_time, 
-                 amu_bed_rate):
+                 simulation_time):
         
         # Define inter-arrival time
 
@@ -41,9 +43,16 @@ class GlobalParameters:
         self.mean_medical_referral = mean_medical_referral
         self.mean_initial_medical_assessment_time = mean_initial_medical_assessment_time
         self.mean_consultant_assessment_time = mean_consultant_assessment_time
-        self.admission_probability = admission_probability
-        self.amu_bed_rate = amu_bed_rate
+        
+        # amu capacity
 
+        self.amu_bed_capacity = amu_bed_capacity  # Total AMU bed capacity
+        self.initial_amu_beds = initial_amu_beds  # Initially available AMU beds
+        self.amu_bed_generation_rate = amu_bed_generation_rate
+        
+        # Additional params
+        self.admission_probability = admission_probability
+        
         # sim duration
 
         self.burn_in_time = burn_in_time
