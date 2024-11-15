@@ -22,9 +22,7 @@ if __name__ == "__main__":
         mean_consultant_assessment_time = 20, 
         admission_probability=0.25,
         
-        amu_bed_capacity = 52, 
-        initial_amu_beds = 5,
-        amu_bed_generation_rate=1,
+        mean_amu_bed_release_interval = 60,
         simulation_time= 20160,
         burn_in_time = 1440) # burn in to prevent initiation bias
         

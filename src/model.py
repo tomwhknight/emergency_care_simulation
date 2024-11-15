@@ -23,10 +23,10 @@ class Model:
 
 
         self.run_results_df = pd.DataFrame(columns=[ "Arrival Time", "Day of Arrival", "Hour of Arrival", 
-        "Time Triage Starts", "Wait for Triage", "Triage Assessment Time", "Triage Complete", "ED Assessment Time", "Completed ED Assessment", 
+        "Time Triage Starts", "Wait for Triage", "Triage Assessment Time", "Triage Complete", "ED Assessment Start Time", "ED Assessment Time", "Completed ED Assessment", 
         "Referral Time", "Arrival to Referral", "Time Joined AMU Queue", "Time Admitted AMU", "Initial Medical Assessment Time",  
         "Time Medical Assessment Complete", "Referral to Consultant", "Consultant Assessment Time", 
-        "Arrival to Consultant Assessment", "Disposition", "Time in System", "Run Number"])
+        "Arrival to Consultant Assessment", "Discharge Time", "Discharge Decision Point", "Time in System", "Run Number"])
         self.run_results_df.index.name = "Patient ID"
 
         # Initialize DataFrame to monitor triage nurse queue
@@ -42,7 +42,8 @@ class Model:
         self.consultant = simpy.PriorityResource(self.env, capacity=self.global_params.consultant_capacity)
 
         # Initialize the AMU bed container
-        self.amu_beds = simpy.Container(self.env, capacity=self.global_params.amu_bed_capacity, init=self.global_params.initial_amu_beds)
+        self.amu_beds = simpy.Store(self.env)
+
 
     def record_result(self, patient_id, column, value):
         """Helper function to record results only if the burn-in period has passed."""
@@ -67,12 +68,12 @@ class Model:
             # Prepare the data for the patient row
             patient_row = [
                 arrival_time, day_of_arrival, hour_of_arrival, 
-                0.0, 0.0, 0.0, 0.0, 0.0,  # Triage-related columns
-                0.0, 0.0,                  # ED Assessment-related columns
+                0.0, 0.0, 0.0, 0.0, 0.0,            # Triage-related columns
+                0.0, 0.0, 0.0,                      # ED Assessment-related columns
                 0.0, 0.0, 0.0, 0.0,                 # Referral-related columns
-                0.0, 0.0,                  # Medical Assessment-related columns
-                0.0, 0.0, '', 0.0,         # Consultant-related columns, Disposition, and Time in System
-                self.run_number            # Run number
+                0.0, 0.0,                           # Medical Assessment-related columns
+                0.0, 0.0, '', 0.0, 0.0,             # Consultant-related columns, Disposition, and Time in System
+                self.run_number                     # Run number
             ]
 
             # Print the length of the row and the DataFrame to check for mismatches
@@ -95,19 +96,29 @@ class Model:
             ED_inter_arrival_time = random.expovariate(1.0 / self.global_params.mean_patient_arrival_time) 
             yield self.env.timeout(ED_inter_arrival_time)
 
+    # Method to generate AMU beds
+
     def generate_amu_beds(self):
-        """Simulate generating AMU beds at a variable rate."""
+        """Periodically release beds based on a Poisson distribution."""
         while True:
-        # Wait for the next bed generation event, based on the rate (in minutes)
-            yield self.env.timeout(self.global_params.amu_bed_generation_rate)
+            # Sample time until next bed release using an exponential distribution
+            amu_bed_release_interval = random.expovariate(1.0 / self.global_params.mean_amu_bed_release_interval)
+            yield self.env.timeout(amu_bed_release_interval)
 
-            # Add 1 bed to the AMU container
-            if self.amu_beds.level < self.global_params.amu_bed_capacity: 
-                self.amu_beds.put(1)  # Add 1 bed
-                print(f"{self.env.now}: Added 1 AMU bed, total: {self.amu_beds.level}")
+            # Check if there are patients waiting in the queue
+            if len(self.amu_beds.items) > 0:
+                # Admit the next patient from the queue
+                admitted_patient = yield self.amu_beds.get()
+                admitted_patient.amu_admission_time = self.env.now
+                print(f"Patient {admitted_patient.id} admitted to AMU at {self.env.now}")
+
+                # Update the queue DataFrame and record results
+                amu_queue_df.loc[amu_queue_df['Patient ID'] == admitted_patient.id,
+                             'Time Admitted to AMU'] = admitted_patient.amu_admission_time
+                record_result(admitted_patient.id, "Time Admitted AMU", admitted_patient.amu_admission_time)
             else:
-                print(f"{self.env.now}: AMU bed capacity reached: {self.amu_beds.level}")
-
+                print(f"No patients waiting for AMU bed at {self.env.now}. Bed remains available.")
+    
     # Method to monitor the triage queue
     def monitor_triage_queue_length(self, interval=10):
         """Monitor the triage nurse queue length at regular intervals."""
@@ -128,13 +139,12 @@ class Model:
             # Wait for the specified interval before checking again
             yield self.env.timeout(interval)
 
-
     # Method to track AMU queue
     def monitor_amu_queue(self, interval=10):
         """Monitor the AMU bed queue length at regular intervals."""
         while True:
             current_time = self.env.now
-            queue_length = self.amu_beds.level  # Length of AMU bed queue
+            queue_length = len(self.amu_beds.items)  # Length of AMU bed queue
 
             # Create a new DataFrame row for the queue length
             new_row = pd.DataFrame({
@@ -220,7 +230,12 @@ class Model:
         """Simulate ED assessment."""
         with self.ed_doctor.request() as req:
             yield req  # Wait until a doctor is available
-            
+
+            # Record the start time of ED assessment
+            ed_assessment_start_time = self.env.now
+            self.record_result(patient.id, "ED Assessment Start Time", ed_assessment_start_time)
+            print(f"Patient {patient.id} starts ED assessment at {ed_assessment_start_time}")
+
             # Simulate the actual triage assessment time using the lognormal distribution
             ed_assessment_time = self.ed_time_distribution.sample()
             yield self.env.timeout(ed_assessment_time)
@@ -232,11 +247,9 @@ class Model:
             # Calculate and record the total time from arrival to the end of ED assessment
             time_at_end_of_ed_assessment = self.env.now - patient.arrival_time
             self.record_result(patient.id, "Completed ED Assessment", time_at_end_of_ed_assessment)
-
             print(f"Patient {patient.id} completes ED assessment at {self.env.now}")
-
-            # Proceed to referral   
-        self.env.process(self.refer_to_medicine(patient))
+   
+        self.env.process(self.refer_to_medicine(patient))  # Proceed to referral  
 
     def refer_to_medicine(self, patient):
         """Simulate the process of referring a patient to medicine."""
@@ -255,7 +268,19 @@ class Model:
         # Capture the time when the referral is completed
         patient.referral_end_time = self.env.now  # Store this timestamp for later use
 
+        # Decision: Discharge or proceed to further assessment
+        if random.random() < 0.75:  # Example: 50% chance to discharge
+            patient.discharged = True
+            patient.discharge_time = self.env.now
+            self.record_result(patient.id, "Discharge Time", patient.discharge_time)
+            self.record_result(patient.id, "Discharge Decision Point", "ed_discharge")
+            print(f"Patient {patient.id} discharged at {patient.discharge_time} after referral to medicine")
+            return  # End process here if discharged
+         
         # After referral, proceed to medical assessment and request AMU bed
+
+        patient.discharged = False
+        print(f"Patient {patient.id} proceeding to further assessment")
         self.env.process(self.initial_medical_assessment(patient)) # Continue medical assessment process in EDso t
         self.env.process(self.refer_to_amu_bed(patient))  # Start the process for AMU bed request
  
@@ -279,26 +304,24 @@ class Model:
         self.amu_queue_df = pd.concat([self.amu_queue_df, new_row], ignore_index=True)
 
         # Request an AMU bed
-        yield self.amu_beds.get(1)
+        yield self.amu_beds.put(patient)
+        print(f"Patient {patient.id} added to AMU bed queue at {self.env.now}")
 
-        # When the bed is available, admit the patient
+        # Wait for a bed to become available and admit the patient
+        admitted_patient = yield self.amu_beds.get()
         patient.amu_admission_time = self.env.now
-        print(f"Patient {patient.id} admitted to AMU at {patient.amu_admission_time}")
+        print(f"Patient {patient.id} admitted to AMU at {self.env.now}")
 
-        # Update the admission time in the queue log dataframe
-        self.amu_queue_df.loc[self.amu_queue_df['Patient ID'] == patient.id, "Time Admitted to AMU"] = patient.amu_admission_time
+        # Update the DataFrame with admission time
+        self.amu_queue_df.loc[self.amu_queue_df['Patient ID'] == patient.id, 'Time Admitted to AMU'] = patient.amu_admission_time
+        self.record_result(patient.id, "Time Admitted AMU", patient.amu_admission_time)
 
-        # Calculate the time spent in the system
-        time_admission_amu = patient.amu_admission_time - patient.arrival_time
-        patient.time_admission_amu = time_admission_amu  # Store total time in system
-        self.record_result(patient.id, "Time Admitted AMU", time_admission_amu)  # Log total time in system
-        print(f"Patient {patient.id} admitted to AMU: {time_admission_amu} minutes")
-
+        # Patient exits the system after being admitted
+        print(f"Patient {patient.id} exits the system after AMU admission")
+        return
+    
         # Exit the process for the patient
-        
-        print(f"Patient {patient.id} exits the system after AMU admission.")
-        return  # Patient leaves after admission and no further processes are triggered
-
+   
     def initial_medical_assessment(self, patient):
         """Simulate initial medical assessment."""
         with self.medical_doctor.request() as req:
@@ -317,7 +340,27 @@ class Model:
             patient.total_time_medical = total_time_medical
             self.record_result(patient.id, "Time Medical Assessment Complete",  total_time_medical)
             
-        # Pass to next process
+    # Discharge decision with a low probability (e.g., 5%)
+        if random.random() < 0.05:  # 5% chance to discharge
+            patient.discharged = True
+            patient.discharge_time = self.env.now
+            self.record_result(patient.id, "Discharge Time", patient.discharge_time)
+            self.record_result(patient.id, "Discharge Decision Point", "after_initial_medical_assessment")
+            print(f"Patient {patient.id} discharged at {patient.discharge_time} after initial medical assessment")
+            
+            # Remove the patient from the AMU queue if they are still in it
+            try:
+                if patient in self.amu_beds.items:
+                    self.amu_beds.items.remove(patient)
+                    print(f"Patient {patient.id} removed from AMU queue due to discharge")
+            except ValueError:
+                pass  # Patient was not in the queue, nothing to remove
+
+            return  # End process here if discharged
+
+    # If not discharged, proceed to consultant assessment
+        patient.discharged = False
+        print(f"Patient {patient.id} proceeding to consultant assessment")
         self.env.process(self.consultant_assessment(patient))
 
     def consultant_assessment(self, patient):
@@ -343,19 +386,30 @@ class Model:
             total_time_consultant = self.env.now - patient.arrival_time
             self.record_result(patient.id, "Arrival to Consultant Assessment", total_time_consultant)
             
-            # Example disposition (admit or discharge)
-            if random.random() < 0.85:
-                patient.disposition = 'admitted'
-            else:
-                patient.disposition = 'discharged'
+        # Discharge decision with a 15% probability
+        if random.random() < 0.15:  # 15% chance to discharge
+            patient.discharged = True
+            patient.discharge_time = self.env.now
+            self.record_result(patient.id, "Discharge Time", patient.discharge_time)
+            self.record_result(patient.id, "Discharge Decision Point", "after_consultant_assessment")
+            print(f"Patient {patient.id} discharged at {patient.discharge_time} after consultant assessment")
+        
+            # Remove the patient from the AMU queue if they are still in it
+            try:
+                if patient in self.amu_beds.items:
+                    self.amu_beds.items.remove(patient)
+                    print(f"Patient {patient.id} removed from AMU queue due to discharge")
+            except ValueError:
+                pass  # Patient was not in the queue, nothing to remove
 
-            # Record the patient's disposition and total time in the system
-            self.record_result(patient.id, "Disposition", patient.disposition)
+            return  # End process here if discharged
+
+            # If not discharged, patient continues to wait in the AMU queue for bed availability
+            print(f"Patient {patient.id} remains in AMU queue awaiting bed after consultant assessment")
+
             time_in_system = self.env.now - patient.arrival_time
             self.record_result(patient.id, "Time in System", time_in_system)
 
-        print(f"Patient {patient.id} {patient.disposition} at {self.env.now}")
-   
     # --- Run Method ---
 
     def run(self):

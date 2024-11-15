@@ -15,9 +15,7 @@ class GlobalParameters:
                  mean_initial_medical_assessment_time, 
                  mean_consultant_assessment_time, 
                  admission_probability,
-                 amu_bed_capacity,
-                 initial_amu_beds,
-                 amu_bed_generation_rate,     
+                 mean_amu_bed_release_interval,    
                  burn_in_time,
                  simulation_time):
         
@@ -44,12 +42,11 @@ class GlobalParameters:
         self.mean_initial_medical_assessment_time = mean_initial_medical_assessment_time
         self.mean_consultant_assessment_time = mean_consultant_assessment_time
         
-        # amu capacity
-
-        self.amu_bed_capacity = amu_bed_capacity  # Total AMU bed capacity
-        self.initial_amu_beds = initial_amu_beds  # Initially available AMU beds
-        self.amu_bed_generation_rate = amu_bed_generation_rate
+        # AMU bed release 
+        self.mean_amu_bed_release_interval = mean_amu_bed_release_interval
         
+
+
         # Additional params
         self.admission_probability = admission_probability
         
