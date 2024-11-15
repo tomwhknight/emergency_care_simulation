@@ -2,7 +2,7 @@ import simpy
 import random
 import pandas as pd
 from src.patient import Patient
-from src.helper import calculate_hour_of_day, calculate_day_of_week
+from src.helper import calculate_hour_of_day, calculate_day_of_week, extract_hour
 from src.helper import Lognormal
 
 class Model:
@@ -37,12 +37,14 @@ class Model:
         self.triage_nurse = simpy.Resource(self.env, capacity=self.global_params.triage_nurse_capacity)
         self.ed_doctor = simpy.Resource(self.env, capacity=self.global_params.ed_doctor_capacity)
         self.medical_doctor = simpy.Resource(self.env, capacity=self.global_params.medical_doctor_capacity)
-        self.consultant = simpy.Resource(self.env, capacity=self.global_params.consultant_capacity)
+        self.consultant = simpy.PriorityResource(self.env, capacity=self.global_params.consultant_capacity)
 
     def record_result(self, patient_id, column, value):
         """Helper function to record results only if the burn-in period has passed."""
         if self.env.now > self.burn_in_time:
             self.run_results_df.at[patient_id, column] = value
+
+    # --- Generator Methods ---
 
     def generate_patient_arrivals(self):
         """Generate patient arrivals based on inter-arrival times."""
@@ -77,6 +79,27 @@ class Model:
             ED_inter_arrival_time = random.expovariate(1.0 / self.global_params.mean_patient_arrival_time) 
             yield self.env.timeout(ED_inter_arrival_time)
 
+    def obstruct_consultant(self):
+        """Block the consultant resource during off-hours (21:00 to 07:00)."""
+        while True:
+            current_hour = extract_hour(self.env.now)
+
+        # Check if we are outside working hours (21:00 to 07:00)
+            if current_hour >= 21 or current_hour < 7:
+                print(f"{self.env.now:.2f}: Consultants are off-duty.")
+            
+            # Request consultant with a high priority to block it
+                with self.consultant.request(priority=-1) as req:
+                    yield req  # Request the resource
+                    off_hours_duration = (7 - current_hour) % 24 * 60  # Time until 07:00
+                    print(f"{self.env.now:.2f}: Consultants will be back at {self.env.now + off_hours_duration}")
+                    yield self.env.timeout(off_hours_duration)  # Block the resource
+
+            # Wait until the next hour to check availability again
+            yield self.env.timeout(60)
+
+    # --- Processes (Patient Pathways) ---
+
     def triage(self, patient):
         start_triage_q = self.env.now
         """Simulate triage."""
@@ -103,22 +126,22 @@ class Model:
             # Print the updated queue length after the request
             print(f"Triage nurse queue length after request: {len(self.triage_nurse.queue)}")
 
-        # Simulate the actual triage assessment time using the lognormal distribution
-        triage_assessment_time = self.triage_time_distribution.sample()
-        patient.triage_assessment_time = triage_assessment_time
+             # Simulate the actual triage assessment time using the lognormal distribution
+            triage_assessment_time = self.triage_time_distribution.sample()
+            patient.triage_assessment_time = triage_assessment_time
         
-        yield self.env.timeout(triage_assessment_time)
+            yield self.env.timeout(triage_assessment_time)
  
-        self.record_result(patient.id, "Triage Assessment Time", patient.triage_assessment_time)
+            self.record_result(patient.id, "Triage Assessment Time", patient.triage_assessment_time)
         
-        # Calculate and record the total time from arrival to the end of triage
-        patient.time_at_end_of_triage = self.env.now - patient.arrival_time
-        self.record_result(patient.id, "Triage Complete", patient.time_at_end_of_triage)
+            # Calculate and record the total time from arrival to the end of triage
+            patient.time_at_end_of_triage = self.env.now - patient.arrival_time
+            self.record_result(patient.id, "Triage Complete", patient.time_at_end_of_triage)
 
-        print(f"Patient {patient.id} completed triage at {self.env.now}")
+            print(f"Patient {patient.id} completed triage at {self.env.now}")
 
-        # Additional print for queue state after triage completion
-        print(f"Triage nurse queue length after triage: {len(self.triage_nurse.queue)}")
+            # Additional print for queue state after triage completion
+            print(f"Triage nurse queue length after triage: {len(self.triage_nurse.queue)}")
 
         # Proceed to ED assessment after triage
         self.env.process(self.ed_assessment(patient))
@@ -142,7 +165,7 @@ class Model:
 
             print(f"Patient {patient.id} completes ED assessment at {self.env.now}")
 
-        # Proceed to referral   
+            # Proceed to referral   
         self.env.process(self.refer_to_medicine(patient))
 
     def refer_to_medicine(self, patient):
@@ -188,6 +211,7 @@ class Model:
 
     def consultant_assessment(self, patient):
         """Simulate consultant assessment process."""
+
         with self.consultant.request() as req:
             yield req  # Wait until a consultant is available
             end_consultant_q = self.env.now
@@ -196,13 +220,13 @@ class Model:
             wait_for_consultant = end_consultant_q - patient.referral_end_time
             self.record_result(patient.id, "Referral to Consultant", wait_for_consultant)
 
+            # Record the consultant assessment time
             consultant_assessment_time = random.expovariate(1.0 / self.global_params.mean_consultant_assessment_time)
             yield self.env.timeout(consultant_assessment_time)
             
             # Record the consultant assessment time
             self.record_result(patient.id, "Consultant Assessment Time", consultant_assessment_time)
             patient.consultant_assessment_time = consultant_assessment_time
-
 
             # Calculate and record the total time from arrival to the end of consultant assessment
             total_time_consultant = self.env.now - patient.arrival_time
@@ -221,8 +245,11 @@ class Model:
 
         print(f"Patient {patient.id} {patient.disposition} at {self.env.now}")
    
+    # --- Run Method ---
+
     def run(self):
         """Run the simulation."""
         self.env.process(self.generate_patient_arrivals())
+        self.env.process(self.obstruct_consultant())
         self.env.run(until=self.global_params.simulation_time)
       

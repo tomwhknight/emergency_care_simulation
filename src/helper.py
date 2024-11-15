@@ -1,5 +1,7 @@
 # helper.py
 import datetime
+import numpy as np
+import math
 
 def calculate_hour_of_day(simulation_time):
     """Converts the simulation time (in minutes) to a readable time of day (HH:MM)."""
@@ -14,8 +16,10 @@ def calculate_day_of_week(simulation_time):
     day_of_week = int(simulation_time // 1440) % 7  # Divide by 1440 (minutes in a day)
     return days[day_of_week]
 
-import numpy as np
-import math
+def extract_hour(simulation_time):
+    """Extracts the hour of the day as an integer from the simulation time (in minutes)."""
+    total_minutes = int(simulation_time % 1440)  # Get remainder of time in the current day
+    return total_minutes // 60  # Return only the hour as an integer
 
 class Lognormal:
     """
