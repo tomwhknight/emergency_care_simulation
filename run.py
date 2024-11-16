@@ -5,7 +5,8 @@ from src.trial import Trial
 
 if __name__ == "__main__":
     global_params = GlobalParameters(
-        mean_patient_arrival_time= 5,
+        ed_peak_mean_patient_arrival_time = 9.6, 
+        ed_off_peak_mean_patient_arrival_time= 3.2,
         triage_nurse_capacity = 2,
         ed_doctor_capacity = 5,
         medical_doctor_capacity = 4,
@@ -23,10 +24,10 @@ if __name__ == "__main__":
         admission_probability=0.25,
         
         mean_amu_bed_release_interval = 60,
-        simulation_time= 20160,
+        simulation_time= 2880,
         burn_in_time = 1440) # burn in to prevent initiation bias
         
 
     trial = Trial(global_params)
-    total_runs = 5
+    total_runs = 2
     trial.run(total_runs)

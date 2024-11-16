@@ -2,7 +2,9 @@
 
 class GlobalParameters:
     """Contains constants and parameters used across the simulation (e.g., arrival rates, service times)."""
-    def __init__(self, mean_patient_arrival_time, 
+    def __init__(self, 
+                 ed_peak_mean_patient_arrival_time, 
+                 ed_off_peak_mean_patient_arrival_time, 
                  triage_nurse_capacity, 
                  ed_doctor_capacity, 
                  medical_doctor_capacity, 
@@ -21,8 +23,9 @@ class GlobalParameters:
         
         # Define inter-arrival time
 
-        self.mean_patient_arrival_time = mean_patient_arrival_time
-        
+        self.ed_peak_mean_patient_arrival_time = ed_peak_mean_patient_arrival_time # 09:00-21:00
+        self.ed_off_peak_mean_patient_arrival_time = ed_off_peak_mean_patient_arrival_time
+
          # Define the resources
 
         self.triage_nurse_capacity = triage_nurse_capacity

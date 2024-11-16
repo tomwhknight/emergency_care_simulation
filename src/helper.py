@@ -63,3 +63,10 @@ class Lognormal:
         Sample from the normal distribution
         """
         return self.rand.lognormal(self.mu, self.sigma)
+    
+
+    # function to track resouce utilisation
+
+    def audit_utilisation(self, activity_attribute, resource_attribute):
+        activity_durations = [getattr(i, activity_attribute) for i in self.patient_objects]
+        return sum(activity_durations) / (g.getattr(resource_attribute) * g.sim_duration)

@@ -57,6 +57,9 @@ class Model:
         while True:
             self.patient_counter += 1
             arrival_time = self.env.now
+            
+            # add time variables
+            
             hour_of_arrival = calculate_hour_of_day(arrival_time)
             day_of_arrival = calculate_day_of_week(arrival_time)
 
@@ -89,12 +92,26 @@ class Model:
             self.record_result(patient.id, "Day of Arrival", day_of_arrival)
             self.record_result(patient.id, "Hour of Arrival", hour_of_arrival)
         
+            
+            # Use the helper function to extract the current hour from simulation time
+            current_hour = extract_hour(self.env.now)
+
+            # Determine arrival rate based on the current hour
+            if 9 <= current_hour < 21:  # Peak hours (09:00 to 21:00)
+                arrival_rate = self.global_params.ed_peak_mean_patient_arrival_time
+            else:  # Off-peak hours (21:00 to 09:00)
+                arrival_rate = self.global_params.ed_off_peak_mean_patient_arrival_time
+
+            # Sample the inter-arrival time using an exponential distribution
+          
+            ED_inter_arrival_time = random.expovariate(1.0 / arrival_rate) 
+            yield self.env.timeout(ED_inter_arrival_time)
+
             # start triage process
             self.env.process(self.triage(patient))
             print(f"Patient {patient.id} arrives at {arrival_time}")
 
-            ED_inter_arrival_time = random.expovariate(1.0 / self.global_params.mean_patient_arrival_time) 
-            yield self.env.timeout(ED_inter_arrival_time)
+            
 
     # Method to generate AMU beds
 
