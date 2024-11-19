@@ -186,7 +186,7 @@ class Model:
             # Wait for the specified interval before checking again
             yield self.env.timeout(interval)
 
-    def monitor_consultant_queue_length(self, interval=1):
+    def monitor_consultant_queue_length(self, interval=60):
         """Monitor consultant queue length at regular intervals."""
         while True:
         # Record the current time and queue length
@@ -287,9 +287,6 @@ class Model:
             # Record the time spent waiting for triage and when triage starts
             self.record_result(patient.id, "Wait for Triage Nurse", patient.wait_time_for_triage_nurse)
 
-            # Print the updated queue length after the request
-            print(f"Triage nurse queue length after request: {len(self.triage_nurse.queue)}")
-
              # Simulate the actual triage assessment time using the lognormal distribution
             triage_assessment_time = self.triage_time_distribution.sample()
             patient.triage_assessment_time = triage_assessment_time
@@ -301,11 +298,6 @@ class Model:
             # Calculate and record the total time from arrival to the end of triage
             patient.time_at_end_of_triage = self.env.now - patient.arrival_time
             self.record_result(patient.id, "Triage Complete", patient.time_at_end_of_triage)
-
-            print(f"Patient {patient.id} completed triage at {self.env.now}")
-
-            # Additional print for queue state after triage completion
-            print(f"Triage nurse queue length after triage: {len(self.triage_nurse.queue)}")
 
         # Proceed to ED assessment after triage
         self.env.process(self.ed_assessment(patient))
@@ -355,7 +347,7 @@ class Model:
         patient.referral_end_time = self.env.now  # Store this timestamp for later use
 
         # Decision: Discharge or proceed to further assessment
-        if random.random() < 0.75:  # Example: 50% chance to discharge
+        if random.random() < 0.1:  # Example: 1% chance to discharge
             patient.discharged = True
             patient.discharge_time = self.env.now
             self.record_result(patient.id, "Discharge Time", patient.discharge_time)
@@ -446,16 +438,11 @@ class Model:
         patient.discharged = False
         print(f"Patient {patient.id} proceeding to consultant assessment")
         self.env.process(self.consultant_assessment(patient))
-
-    
+        
     # Simulate consultant assessment process
 
     def consultant_assessment(self, patient):
-
-        # Skip assessment if the patient has already been admitted to AMU
-        if patient.amu_admission_time: print(f"Patient {patient.id} admitted to AMU before consultant assessment.")
-        return
-
+   
         # Log and save the time when the patient requests the consultant
         consultant_request_time = self.env.now
         self.record_result(patient.id, "Simulation Time Consultant Request", consultant_request_time)
@@ -519,9 +506,6 @@ class Model:
         # Start the patient arrival process
         self.env.process(self.generate_patient_arrivals())
 
-        # Start the consultant obstruction process
-        self.env.process(self.obstruct_consultant())
-
         # Start monitoring the triage nurse queue
         self.env.process(self.monitor_triage_queue_length())
    
@@ -536,4 +520,8 @@ class Model:
     
         # Run the simulation
         self.env.run(until=self.global_params.simulation_time)
+
+        # Start the consultant obstruction process
+        self.env.process(self.obstruct_consultant())
+
       

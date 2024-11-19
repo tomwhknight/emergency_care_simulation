@@ -32,7 +32,7 @@ if __name__ == "__main__":
         admission_probability=0.20,
         mean_amu_bed_release_interval = 60,
         simulation_time= 2880,
-        burn_in_time = 0) # burn in to prevent initiation bias
+        burn_in_time = 1440) # burn in to prevent initiation bias
         
     trial = Trial(global_params)
     total_runs = 2
