@@ -24,16 +24,16 @@ if __name__ == "__main__":
         mean_initial_medical_assessment_time = 60,
         
         mean_consultant_assessment_time = 15,
-        stdev_consultant_assessment_time = 10, 
+        stdev_consultant_assessment_time = 5, 
 
         unav_freq_consultant = 1440,
-        unav_time_consultant = 660,
+        unav_time_consultant = 600,
 
         admission_probability=0.20,
-        mean_amu_bed_release_interval = 60,
+        mean_amu_bed_release_interval = 20,
         simulation_time= 2880,
         burn_in_time = 1440) # burn in to prevent initiation bias
         
     trial = Trial(global_params)
-    total_runs = 2
+    total_runs = 1
     trial.run(total_runs)

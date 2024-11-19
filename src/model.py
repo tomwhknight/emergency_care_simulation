@@ -42,7 +42,7 @@ class Model:
             "Referral Time", 
             "Arrival to Referral", 
             "Time Joined AMU Queue", 
-            "Time Admitted AMU", 
+            "Time Admitted to AMU", 
             "Initial Medical Assessment Time",  
             "Time Medical Assessment Complete",
             "Simulation Time Consultant Request",
@@ -151,6 +151,7 @@ class Model:
     # Method to generate AMU beds
 
     def generate_amu_beds(self):
+        print(f"{self.env.now:.2f}: obstruct_consultant process started.")
         """Periodically release beds based on a Poisson distribution."""
         while True:
             # Sample time until next bed release using an exponential distribution
@@ -241,45 +242,32 @@ class Model:
     # Method to model restricted consultant working hours 
  
     def obstruct_consultant(self):
-        """Simulate periodic consultant unavailability."""
-        # Calculate the time until the first off-duty period starts at 21:00
-        current_hour = extract_hour(self.env.now)
-        if current_hour < 21:
-            time_until_first_off_duty = (21 - current_hour) * 60 - (self.env.now % 60)
-        else:
-            time_until_first_off_duty = ((24 - current_hour) + 21) * 60 - (self.env.now % 60)
-
-        # Wait until the first off-duty period
-        yield self.env.timeout(time_until_first_off_duty)
-
+        """Simulate consultant unavailability between 21:00 and 07:00."""
         while True:
-            # Start off-duty period
-            print(f"{self.env.now:.2f}: Consultants are now off-duty for the next {self.global_params.unav_time_consultant:.2f} minutes.")
-            with self.consultant.request(priority=-1) as req:
-                yield req
-                yield self.env.timeout(self.global_params.unav_time_consultant)
-                print(f"{self.env.now:.2f}: Consultants are back on duty.")
+            # Extract the current hour
+            current_hour = extract_hour(self.env.now)
 
-            # Wait until the next off-duty period
-            yield self.env.timeout(self.global_params.unav_freq_consultant)
+            # Check if the current time is within the off-duty period (21:00–07:00)
+            if current_hour >= 21 or current_hour < 7:
+                print(f"{self.env.now:.2f}: Consultants are off-duty (21:00–07:00).")
+                with self.consultant.request(priority=-1) as req:
+                    yield req  # Block the resource
+                    yield self.env.timeout(60)  # Hold the block for 1 hour
+            else:
+                print(f"{self.env.now:.2f}: Consultants are available.")
 
+            # Wait until the next hour to check again
+            yield self.env.timeout(60)
     # --- Processes (Patient Pathways) ---
 
     def triage(self, patient):
         start_triage_q = self.env.now
         """Simulate triage."""
-        # Print queue length before making the request
-        print(f"Triage nurse queue length before request: {len(self.triage_nurse.queue)}")
-        print(f"Triage nurse capacity before request: {self.triage_nurse.capacity}")
-        
+      
         with self.triage_nurse.request() as req:
             print(f"Patient {patient.id} is requesting a nurse at {self.env.now}")
             yield req  # Wait until a triage is available
-            
-            # Print the queue length and capacity after the request
-            print(f"Triage nurse capacity after request: {self.triage_nurse.capacity}")
-            print(f"Triage nurse queue length after request: {len(self.triage_nurse.queue)}")
-
+        
             # Time triage assessment begins
             start_triage_time = self.env.now
             patient.wait_time_for_triage_nurse = start_triage_time - start_triage_q
@@ -390,7 +378,7 @@ class Model:
        
         # Update the DataFrame with admission time
         self.amu_queue_df.loc[self.amu_queue_df['Patient ID'] == patient.id, 'Time Admitted to AMU'] = patient.amu_admission_time
-        self.record_result(patient.id, "Time Admitted AMU", patient.amu_admission_time)
+        self.record_result(patient.id, "Time Admitted to AMU", patient.amu_admission_time)
 
         # Patient exits the system after being admitted
         print(f"Patient {patient.id} exits the system after AMU admission")
@@ -399,6 +387,12 @@ class Model:
         # Exit the process for the patient
    
     def initial_medical_assessment(self, patient):
+        if patient.amu_admission_time:
+            print(f"{self.env.now:.2f}: Patient {patient.id} admitted to AMU before initial medical assessment.")
+            return
+        else:
+            print(f"{self.env.now:.2f}: Patient {patient.id} proceeding to initial medical assessment.")
+
         """Simulate initial medical assessment."""
         with self.medical_doctor.request() as req:
             yield req  # Wait until medical staff is available
@@ -442,14 +436,22 @@ class Model:
     # Simulate consultant assessment process
 
     def consultant_assessment(self, patient):
-   
+        if patient.amu_admission_time:
+            print(f"{self.env.now:.2f}: Patient {patient.id} admitted to AMU before consultant assessment.")
+            return
+        else:
+            print(f"{self.env.now:.2f}: Patient {patient.id} proceeding to consultant assessment.")
+
         # Log and save the time when the patient requests the consultant
         consultant_request_time = self.env.now
         self.record_result(patient.id, "Simulation Time Consultant Request", consultant_request_time)
         print(f"{consultant_request_time:.2f}: Patient {patient.id} requests a consultant.")
 
         with self.consultant.request(priority = patient.priority) as req:
+            print(f"[{self.env.now:.2f}] Consultant capacity: {self.consultant.capacity}")
+            print(f"[{self.env.now:.2f}] Consultant queue length before request: {len(self.consultant.queue)}")
             yield req  # Wait until a consultant is available
+            print(f"[{self.env.now:.2f}] Consultant queue length after assignment: {len(self.consultant.queue)}")
             end_consultant_q = self.env.now
             self.record_result(patient.id, 'Simulation Time Consultant Assessment Starts', end_consultant_q)
             print(f"{end_consultant_q:.2f}: Consultant starts assessing Patient {patient.id}")
@@ -472,7 +474,9 @@ class Model:
             # Calculate and record the total time from arrival to the end of consultant assessment
             total_time_consultant = self.env.now - patient.arrival_time
             self.record_result(patient.id, "Arrival to Consultant Assessment", total_time_consultant)
-            
+            yield self.env.timeout(consultant_assessment_time)  # Simulate assessment duration
+            print(f"{self.env.now:.2f}: Consultant finishes assessing Patient {patient.id}.")
+
         # Discharge decision with a 15% probability
         if random.random() < 0.15:  # 15% chance to discharge
             patient.discharged = True
@@ -516,12 +520,14 @@ class Model:
         self.env.process(self.generate_amu_beds())  
 
         # Start monitoring the AMU bed queue
-        self.env.process(self.monitor_amu_queue()) 
+        self.env.process(self.monitor_amu_queue())
+
+        # Start the consultant obstruction process
+        self.env.process(self.obstruct_consultant())
     
         # Run the simulation
         self.env.run(until=self.global_params.simulation_time)
 
-        # Start the consultant obstruction process
-        self.env.process(self.obstruct_consultant())
+    
 
       
