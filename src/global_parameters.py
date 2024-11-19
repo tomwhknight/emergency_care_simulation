@@ -13,9 +13,13 @@ class GlobalParameters:
                  stdev_triage_assessment_time,
                  mean_ed_assessment_time, 
                  stdev_ed_assessment_time,
-                 mean_medical_referral,
+                 mean_referral_time,
+                 stdev_referral_time,
                  mean_initial_medical_assessment_time, 
-                 mean_consultant_assessment_time, 
+                 mean_consultant_assessment_time,
+                 stdev_consultant_assessment_time, 
+                 unav_freq_consultant,
+                 unav_time_consultant,
                  admission_probability,
                  mean_amu_bed_release_interval,    
                  burn_in_time,
@@ -41,10 +45,19 @@ class GlobalParameters:
         self.mean_ed_assessment_time = mean_ed_assessment_time
         self.stdev_ed_assessment_time = stdev_ed_assessment_time
 
-        self.mean_medical_referral = mean_medical_referral
+        self.mean_referral_time = mean_referral_time
+        self.stdev_referral_time = stdev_referral_time
+
         self.mean_initial_medical_assessment_time = mean_initial_medical_assessment_time
         self.mean_consultant_assessment_time = mean_consultant_assessment_time
         
+        self.mean_consultant_assessment_time = mean_consultant_assessment_time
+        self.stdev_consultant_assessment_time = stdev_consultant_assessment_time 
+
+        self.unav_freq_consultant = unav_freq_consultant
+        self.unav_time_consultant = unav_time_consultant
+
+
         # AMU bed release 
         self.mean_amu_bed_release_interval = mean_amu_bed_release_interval
         

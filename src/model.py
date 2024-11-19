@@ -13,6 +13,7 @@ class Model:
         self.run_number = run_number
         self.burn_in_time = burn_in_time
         self.patient_counter = 0
+        self.total_beds_generated = 0 
 
         # Instantiate the Lognormal distribution for triage assessment time
         self.triage_time_distribution = Lognormal(mean=self.global_params.mean_triage_assessment_time,
@@ -21,16 +22,46 @@ class Model:
         self.ed_time_distribution = Lognormal(mean=self.global_params.mean_ed_assessment_time, 
                                                    stdev=self.global_params.stdev_ed_assessment_time)
 
+        self.referral_time_distribution = Lognormal(mean=self.global_params.mean_referral_time, 
+                                                   stdev=self.global_params.stdev_referral_time)
 
-        self.run_results_df = pd.DataFrame(columns=[ "Arrival Time", "Day of Arrival", "Hour of Arrival", 
-        "Time Triage Starts", "Wait for Triage", "Triage Assessment Time", "Triage Complete", "ED Assessment Start Time", "ED Assessment Time", "Completed ED Assessment", 
-        "Referral Time", "Arrival to Referral", "Time Joined AMU Queue", "Time Admitted AMU", "Initial Medical Assessment Time",  
-        "Time Medical Assessment Complete", "Referral to Consultant", "Consultant Assessment Time", 
-        "Arrival to Consultant Assessment", "Discharge Time", "Discharge Decision Point", "Time in System", "Run Number"])
+        self.consultant_time_distribution = Lognormal(mean=self.global_params.mean_consultant_assessment_time, 
+                                                   stdev=self.global_params.stdev_consultant_assessment_time)
+        
+        self.run_results_df = pd.DataFrame(columns=[
+            "Simulation Arrival Time", 
+            "Day of Arrival", 
+            "Clock Hour of Arrival", 
+            "Hour of Arrival", 
+            "Wait for Triage Nurse", 
+            "Triage Assessment Time", 
+            "Triage Complete", 
+            "ED Assessment Start Time", 
+            "ED Assessment Time", 
+            "Completed ED Assessment",
+            "Referral Time", 
+            "Arrival to Referral", 
+            "Time Joined AMU Queue", 
+            "Time Admitted AMU", 
+            "Initial Medical Assessment Time",  
+            "Time Medical Assessment Complete",
+            "Simulation Time Consultant Request",
+            "Simulation Time Consultant Assessment Starts", 
+            "Referral to Consultant", 
+            "Consultant Assessment Time", 
+            "Arrival to Consultant Assessment", 
+            "Discharge Time", 
+            "Discharge Decision Point", 
+            "Time in System", 
+            "Run Number"
+        ])
         self.run_results_df.index.name = "Patient ID"
 
         # Initialize DataFrame to monitor triage nurse queue
-        self.triage_queue_monitoring_df = pd.DataFrame(columns=['Time', 'Queue Length'])
+        self.triage_queue_monitoring_df = pd.DataFrame(columns=['Simulation Time', 'Hour of Day', 'Queue Length'])
+    
+        # Initialize DataFrame to monitor consultant queue
+        self.consultant_queue_monitoring_df = pd.DataFrame(columns=['Simulation Time', 'Hour of Day', 'Queue Length'])
     
         # Initialize the DataFrame for tracking the AMU bed queue times
         self.amu_queue_df = pd.DataFrame(columns=["Patient ID", "Time Joined AMU Queue", "Time Admitted to AMU"])
@@ -42,40 +73,44 @@ class Model:
         self.consultant = simpy.PriorityResource(self.env, capacity=self.global_params.consultant_capacity)
 
         # Initialize the AMU bed container
-        self.amu_beds = simpy.Store(self.env)
+        self.amu_beds = simpy.Store(self.env, capacity = 10)
 
 
     def record_result(self, patient_id, column, value):
         """Helper function to record results only if the burn-in period has passed."""
         if self.env.now > self.burn_in_time:
+            if column not in self.run_results_df.columns:
+                print(f"Warning: Attempting to add a new column '{column}'. Ignoring update.")
+                return  # Ignore the update if the column does not exist
             self.run_results_df.at[patient_id, column] = value
-
+    
     # --- Generator Methods ---
 
     def generate_patient_arrivals(self):
         """Generate patient arrivals based on inter-arrival times."""
         while True:
             self.patient_counter += 1
-            arrival_time = self.env.now
+            self.arrival_time = self.env.now
             
             # add time variables
             
-            hour_of_arrival = calculate_hour_of_day(arrival_time)
-            day_of_arrival = calculate_day_of_week(arrival_time)
+            self.arrival_clock_time = calculate_hour_of_day(self.arrival_time)
+            self.day_of_arrival = calculate_day_of_week(self.arrival_time)
+            self.current_hour = extract_hour(self.arrival_time)
 
             # create instance of patient class using
-            patient = Patient(self.patient_counter, arrival_time, hour_of_arrival, day_of_arrival)
+            patient = Patient(self.patient_counter, self.arrival_time, self.day_of_arrival, self.arrival_clock_time, self.current_hour)
 
             # Initialize a row for this patient in the DataFrame
             
             # Prepare the data for the patient row
             patient_row = [
-                arrival_time, day_of_arrival, hour_of_arrival, 
-                0.0, 0.0, 0.0, 0.0, 0.0,            # Triage-related columns
+                self.arrival_time, self.day_of_arrival, self.arrival_clock_time, self.current_hour, 
+                0.0, 0.0, 0.0,                 # Triage-related columns
                 0.0, 0.0, 0.0,                      # ED Assessment-related columns
                 0.0, 0.0, 0.0, 0.0,                 # Referral-related columns
                 0.0, 0.0,                           # Medical Assessment-related columns
-                0.0, 0.0, '', 0.0, 0.0,             # Consultant-related columns, Disposition, and Time in System
+                0.0, 0.0, 0.0, 0.0, 0.0, 0.0, '', 0.0,             # Consultant-related columns, Disposition, and Time in System
                 self.run_number                     # Run number
             ]
 
@@ -88,31 +123,31 @@ class Model:
             self.run_results_df.loc[patient.id] = patient_row
            
             # Record patient arrival
-            self.record_result(patient.id, "Arrival Time", arrival_time)
-            self.record_result(patient.id, "Day of Arrival", day_of_arrival)
-            self.record_result(patient.id, "Hour of Arrival", hour_of_arrival)
+            self.record_result(patient.id, "Simulation Arrival Time", self.arrival_time)
+            self.record_result(patient.id, "Day of Arrival", self.day_of_arrival)
+            self.record_result(patient.id, "Clock Hour of Arrival", self.arrival_clock_time)
+            self.record_result(patient.id, "Hour of Arrival", self.current_hour)
         
-            
             # Use the helper function to extract the current hour from simulation time
-            current_hour = extract_hour(self.env.now)
-
+            
             # Determine arrival rate based on the current hour
-            if 9 <= current_hour < 21:  # Peak hours (09:00 to 21:00)
-                arrival_rate = self.global_params.ed_peak_mean_patient_arrival_time
+            if 9 <= self.current_hour < 21:  # Peak hours (09:00 to 21:00)
+                mean_interarrival_time = self.global_params.ed_peak_mean_patient_arrival_time
             else:  # Off-peak hours (21:00 to 09:00)
-                arrival_rate = self.global_params.ed_off_peak_mean_patient_arrival_time
-
+                mean_interarrival_time = self.global_params.ed_off_peak_mean_patient_arrival_time
+    
+            # Convert mean inter-arrival time to a rate
+            arrival_rate = 1.0 / mean_interarrival_time
             # Sample the inter-arrival time using an exponential distribution
           
-            ED_inter_arrival_time = random.expovariate(1.0 / arrival_rate) 
+            ED_inter_arrival_time = random.expovariate(arrival_rate) 
             yield self.env.timeout(ED_inter_arrival_time)
 
             # start triage process
             self.env.process(self.triage(patient))
-            print(f"Patient {patient.id} arrives at {arrival_time}")
+            print(f"Patient {patient.id} arrives at {self.arrival_time}")
 
-            
-
+    
     # Method to generate AMU beds
 
     def generate_amu_beds(self):
@@ -122,36 +157,64 @@ class Model:
             amu_bed_release_interval = random.expovariate(1.0 / self.global_params.mean_amu_bed_release_interval)
             yield self.env.timeout(amu_bed_release_interval)
 
-            # Check if there are patients waiting in the queue
-            if len(self.amu_beds.items) > 0:
-                # Admit the next patient from the queue
-                admitted_patient = yield self.amu_beds.get()
-                admitted_patient.amu_admission_time = self.env.now
-                print(f"Patient {admitted_patient.id} admitted to AMU at {self.env.now}")
-
-                # Update the queue DataFrame and record results
-                amu_queue_df.loc[amu_queue_df['Patient ID'] == admitted_patient.id,
-                             'Time Admitted to AMU'] = admitted_patient.amu_admission_time
-                record_result(admitted_patient.id, "Time Admitted AMU", admitted_patient.amu_admission_time)
-            else:
-                print(f"No patients waiting for AMU bed at {self.env.now}. Bed remains available.")
+            # Add a bed if there is space in the store
+            if len(self.amu_beds.items) < self.amu_beds.capacity:
+                yield self.amu_beds.put("Bed")
+                self.total_beds_generated += 1  # Increment counter
+                print(f"Bed added to AMU at {self.env.now}. Total beds available: {len(self.amu_beds.items)}")
+            else: print(f"No space to add more beds at {self.env.now}.")
     
     # Method to monitor the triage queue
-    def monitor_triage_queue_length(self, interval=10):
+
+    def monitor_triage_queue_length(self, interval=60):
         """Monitor the triage nurse queue length at regular intervals."""
         while True:
             # Record the current time and queue length
             current_time = self.env.now
             queue_length = len(self.triage_nurse.queue)
-        
+            hour_of_day = (current_time // 60) % 24
             # Create a new DataFrame for the current row
             new_row = pd.DataFrame({
-            'Time': [current_time],
+            'Simulation Time': [current_time],
+            'Hour of Day': [hour_of_day],
             'Queue Length': [queue_length]
             })
         
             # Concatenate the new row with the existing DataFrame
             self.triage_queue_monitoring_df = pd.concat([self.triage_queue_monitoring_df, new_row], ignore_index=True)
+        
+            # Wait for the specified interval before checking again
+            yield self.env.timeout(interval)
+
+    def monitor_consultant_queue_length(self, interval=1):
+        """Monitor consultant queue length at regular intervals."""
+        while True:
+        # Record the current time and queue length
+            current_time = self.env.now
+            queue_length = len(self.consultant.queue)
+            hour_of_day = (current_time // 60) % 24
+        
+            # Print the current queue status for debugging
+            print(f"[{self.env.now:.2f}] Monitoring Consultant Queue: {queue_length} patients waiting at hour {hour_of_day}")
+
+        # Check if there are any patients currently in the queue
+            if queue_length > 0:
+                print(f"Consultant Queue Status: {queue_length} patients are still in the queue.")
+                # Print patient IDs currently in the queue
+                patient_ids = [req.priority for req in self.consultant.queue]
+                print(f"Patients in Consultant Queue: {patient_ids}")
+            else:
+                print("Consultant Queue Status: Queue is empty.")
+
+            # Create a new DataFrame for the current row
+            new_row = pd.DataFrame({
+                'Simulation Time': [current_time],
+                'Hour of Day': [hour_of_day],
+                'Queue Length': [queue_length]
+            })
+
+            # Concatenate the new row with the existing DataFrame
+            self.consultant_queue_monitoring_df = pd.concat([self.consultant_queue_monitoring_df, new_row], ignore_index=True)
         
             # Wait for the specified interval before checking again
             yield self.env.timeout(interval)
@@ -176,24 +239,29 @@ class Model:
             yield self.env.timeout(interval)
 
     # Method to model restricted consultant working hours 
+ 
     def obstruct_consultant(self):
-        """Block the consultant resource during off-hours (21:00 to 07:00)."""
+        """Simulate periodic consultant unavailability."""
+        # Calculate the time until the first off-duty period starts at 21:00
+        current_hour = extract_hour(self.env.now)
+        if current_hour < 21:
+            time_until_first_off_duty = (21 - current_hour) * 60 - (self.env.now % 60)
+        else:
+            time_until_first_off_duty = ((24 - current_hour) + 21) * 60 - (self.env.now % 60)
+
+        # Wait until the first off-duty period
+        yield self.env.timeout(time_until_first_off_duty)
+
         while True:
-            current_hour = extract_hour(self.env.now)
+            # Start off-duty period
+            print(f"{self.env.now:.2f}: Consultants are now off-duty for the next {self.global_params.unav_time_consultant:.2f} minutes.")
+            with self.consultant.request(priority=-1) as req:
+                yield req
+                yield self.env.timeout(self.global_params.unav_time_consultant)
+                print(f"{self.env.now:.2f}: Consultants are back on duty.")
 
-        # Check if we are outside working hours (21:00 to 07:00)
-            if current_hour >= 21 or current_hour < 7:
-                print(f"{self.env.now:.2f}: Consultants are off-duty.")
-            
-            # Request consultant with a high priority to block it
-                with self.consultant.request(priority=-1) as req:
-                    yield req  # Request the resource
-                    off_hours_duration = (7 - current_hour) % 24 * 60  # Time until 07:00
-                    print(f"{self.env.now:.2f}: Consultants will be back at {self.env.now + off_hours_duration}")
-                    yield self.env.timeout(off_hours_duration)  # Block the resource
-
-            # Wait until the next hour to check availability again
-            yield self.env.timeout(60)
+            # Wait until the next off-duty period
+            yield self.env.timeout(self.global_params.unav_freq_consultant)
 
     # --- Processes (Patient Pathways) ---
 
@@ -213,12 +281,11 @@ class Model:
             print(f"Triage nurse queue length after request: {len(self.triage_nurse.queue)}")
 
             # Time triage assessment begins
-            end_triage_q = self.env.now
-            patient.wait_time_for_triage = end_triage_q - start_triage_q
+            start_triage_time = self.env.now
+            patient.wait_time_for_triage_nurse = start_triage_time - start_triage_q
             
             # Record the time spent waiting for triage and when triage starts
-            self.record_result(patient.id, "Wait for Triage", patient.wait_time_for_triage)
-            self.record_result(patient.id, "Time Triage Starts", end_triage_q)
+            self.record_result(patient.id, "Wait for Triage Nurse", patient.wait_time_for_triage_nurse)
 
             # Print the updated queue length after the request
             print(f"Triage nurse queue length after request: {len(self.triage_nurse.queue)}")
@@ -269,11 +336,13 @@ class Model:
         self.env.process(self.refer_to_medicine(patient))  # Proceed to referral  
 
     def refer_to_medicine(self, patient):
+        
         """Simulate the process of referring a patient to medicine."""
-        # Simulate a referral time or any required delay
-        referral_time = random.expovariate(1.0 / self.global_params.mean_medical_referral)
+        
+        # Simulate the actual triage assessment time using the lognormal distribution
+        referral_time = self.referral_time_distribution.sample()
         yield self.env.timeout(referral_time)
-
+     
         # Record the referral time
         self.record_result(patient.id, "Referral Time", referral_time)
         print(f"Patient {patient.id} referred to medicine at {self.env.now}")
@@ -310,7 +379,7 @@ class Model:
         patient.joined_amu_queue_time = self.env.now
         self.record_result(patient.id, "Time Joined AMU Queue", patient.joined_amu_queue_time)
 
-       # Create a DataFrame for the new row to be added
+        # Create a DataFrame for the new row to be added
         new_row = pd.DataFrame([{
         "Patient ID": patient.id,
         "Time Joined AMU Queue": patient.joined_amu_queue_time,
@@ -320,15 +389,13 @@ class Model:
         # Concatenate the new row to the existing DataFrame
         self.amu_queue_df = pd.concat([self.amu_queue_df, new_row], ignore_index=True)
 
-        # Request an AMU bed
-        yield self.amu_beds.put(patient)
-        print(f"Patient {patient.id} added to AMU bed queue at {self.env.now}")
-
-        # Wait for a bed to become available and admit the patient
-        admitted_patient = yield self.amu_beds.get()
+        yield self.amu_beds.get()  # Patient waits for a bed
         patient.amu_admission_time = self.env.now
-        print(f"Patient {patient.id} admitted to AMU at {self.env.now}")
+        print(f"Patient {patient.id} admitted to AMU at {patient.amu_admission_time}")
 
+        # Record admission time
+        self.record_result(patient.id, "Time Admitted to AMU", patient.amu_admission_time)
+       
         # Update the DataFrame with admission time
         self.amu_queue_df.loc[self.amu_queue_df['Patient ID'] == patient.id, 'Time Admitted to AMU'] = patient.amu_admission_time
         self.record_result(patient.id, "Time Admitted AMU", patient.amu_admission_time)
@@ -380,21 +447,37 @@ class Model:
         print(f"Patient {patient.id} proceeding to consultant assessment")
         self.env.process(self.consultant_assessment(patient))
 
-    def consultant_assessment(self, patient):
-        """Simulate consultant assessment process."""
+    
+    # Simulate consultant assessment process
 
-        with self.consultant.request() as req:
+    def consultant_assessment(self, patient):
+
+        # Skip assessment if the patient has already been admitted to AMU
+        if patient.amu_admission_time: print(f"Patient {patient.id} admitted to AMU before consultant assessment.")
+        return
+
+        # Log and save the time when the patient requests the consultant
+        consultant_request_time = self.env.now
+        self.record_result(patient.id, "Simulation Time Consultant Request", consultant_request_time)
+        print(f"{consultant_request_time:.2f}: Patient {patient.id} requests a consultant.")
+
+        with self.consultant.request(priority = patient.priority) as req:
             yield req  # Wait until a consultant is available
             end_consultant_q = self.env.now
+            self.record_result(patient.id, 'Simulation Time Consultant Assessment Starts', end_consultant_q)
+            print(f"{end_consultant_q:.2f}: Consultant starts assessing Patient {patient.id}")
+
+            # Log the current queue length right after a patient gets the consultant
+            print(f"[{self.env.now:.2f}] Consultant queue length after assigning patient {patient.id}: {len(self.consultant.queue)}")
 
             # Calculate the waiting time from end of referral to start of consultant assessment
             wait_for_consultant = end_consultant_q - patient.referral_end_time
             self.record_result(patient.id, "Referral to Consultant", wait_for_consultant)
 
-            # Record the consultant assessment time
-            consultant_assessment_time = random.expovariate(1.0 / self.global_params.mean_consultant_assessment_time)
-            yield self.env.timeout(consultant_assessment_time)
-            
+            # Simulate the actual triage assessment time using the lognormal distribution
+            consultant_assessment_time = self.consultant_time_distribution.sample()
+            patient.consultant_assessment_time = consultant_assessment_time 
+
             # Record the consultant assessment time
             self.record_result(patient.id, "Consultant Assessment Time", consultant_assessment_time)
             patient.consultant_assessment_time = consultant_assessment_time
@@ -421,15 +504,16 @@ class Model:
 
             return  # End process here if discharged
 
-            # If not discharged, patient continues to wait in the AMU queue for bed availability
-            print(f"Patient {patient.id} remains in AMU queue awaiting bed after consultant assessment")
+        # If not discharged, patient continues to wait in the AMU queue for bed availability
+        print(f"Patient {patient.id} remains in AMU queue awaiting bed after consultant assessment")
 
-            time_in_system = self.env.now - patient.arrival_time
-            self.record_result(patient.id, "Time in System", time_in_system)
+        time_in_system = self.env.now - patient.arrival_time
+        self.record_result(patient.id, "Time in System", time_in_system)
 
     # --- Run Method ---
 
     def run(self):
+
         """Run the simulation."""
         
         # Start the patient arrival process
@@ -441,6 +525,9 @@ class Model:
         # Start monitoring the triage nurse queue
         self.env.process(self.monitor_triage_queue_length())
    
+        # Start monitoring the triage nurse queue
+        self.env.process(self.monitor_consultant_queue_length())
+
         # Start the AMU bed generation process
         self.env.process(self.generate_amu_beds())  
 
