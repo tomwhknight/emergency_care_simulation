@@ -18,9 +18,8 @@ class GlobalParameters:
                  mean_initial_medical_assessment_time, 
                  mean_consultant_assessment_time,
                  stdev_consultant_assessment_time, 
-                 unav_freq_consultant,
-                 unav_time_consultant,
-                 admission_probability,
+                 ed_discharge_rate,
+                 medicine_discharge_rate,
                  mean_amu_bed_release_interval,    
                  burn_in_time,
                  simulation_time):
@@ -54,18 +53,11 @@ class GlobalParameters:
         self.mean_consultant_assessment_time = mean_consultant_assessment_time
         self.stdev_consultant_assessment_time = stdev_consultant_assessment_time 
 
-        self.unav_freq_consultant = unav_freq_consultant
-        self.unav_time_consultant = unav_time_consultant
-
-
         # AMU bed release 
         self.mean_amu_bed_release_interval = mean_amu_bed_release_interval
-        
+        self.ed_discharge_rate = ed_discharge_rate
+        self.medicine_discharge_rate = medicine_discharge_rate
 
-
-        # Additional params
-        self.admission_probability = admission_probability
-        
         # sim duration
 
         self.burn_in_time = burn_in_time
