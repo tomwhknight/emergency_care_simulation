@@ -28,14 +28,22 @@ class Model:
         self.consultant_time_distribution = Lognormal(mean=self.global_params.mean_consultant_assessment_time, 
                                                    stdev=self.global_params.stdev_consultant_assessment_time)
         
+        self.sdec_time_distribution = Lognormal(mean=self.global_params.mean_sdec_assessment_time, 
+                                                   stdev=self.global_params.stdev_sdec_assessment_time)
+        
+        # Create results DF
+
         self.run_results_df = pd.DataFrame(columns=[
             "Simulation Arrival Time", 
             "Day of Arrival", 
             "Clock Hour of Arrival", 
-            "Hour of Arrival", 
+            "Hour of Arrival",
+            "Acuity",  
             "Wait for Triage Nurse", 
             "Triage Assessment Time", 
             "Triage Complete", 
+            "SDEC Accepted",
+            "SDEC Decision Reason", 
             "ED Assessment Start Time", 
             "ED Assessment Time", 
             "Completed ED Assessment",
@@ -51,7 +59,7 @@ class Model:
             "Simulation Time Consultant Assessment Starts", 
             "Referral to Consultant Assessment", 
             "Consultant Assessment Time", 
-            "Arrival to Consultant Assessment", 
+            "Arrival to Consultant Assessment",
             "Discharge Time", 
             "Discharge Decision Point", 
             "Time in System", 
@@ -75,8 +83,10 @@ class Model:
         self.consultant = simpy.PriorityResource(self.env, capacity=self.global_params.consultant_capacity)
 
         # Initialize the AMU bed container
-        self.amu_beds = simpy.Store(self.env, capacity = 10)
+        self.amu_beds = simpy.Store(self.env, capacity = self.global_params.max_amu_available_beds)
 
+        # Initialize the SDEC capacity container
+        self.sdec_capacity = simpy.Store(self.env, capacity = self.global_params.max_sdec_capacity)
 
     def record_result(self, patient_id, column, value):
 
@@ -90,27 +100,40 @@ class Model:
     
     # --- Generator Methods ---
 
+    # Method to generate patient arrivals
     def generate_patient_arrivals(self):
 
         """Generate patient arrivals based on inter-arrival times."""
         
         while True:
             self.patient_counter += 1
-            self.arrival_time = self.env.now
+            arrival_time = self.env.now
             
-            # add time variables
+            # Add time variables
             
-            self.arrival_clock_time = calculate_hour_of_day(self.arrival_time)
-            self.day_of_arrival = calculate_day_of_week(self.arrival_time)
-            self.current_hour = extract_hour(self.arrival_time)
+            arrival_clock_time = calculate_hour_of_day(arrival_time)
+            day_of_arrival = calculate_day_of_week(arrival_time)
+            current_hour = extract_hour(arrival_time)
 
-            # create instance of patient class using
-            patient = Patient(self.patient_counter, self.arrival_time, self.day_of_arrival, self.arrival_clock_time, self.current_hour)
+            # Assign acuity level based on probabilities from GlobalParameters
+            
+            acuity_levels = list(self.global_params.acuity_probabilities.keys())
+            acuity_weights = list(self.global_params.acuity_probabilities.values())
+            acuity = random.choices(acuity_levels, weights=acuity_weights, k=1)[0]
+            
+             # Create instance of patient class using
+            patient = Patient(self.patient_counter, arrival_time, day_of_arrival, arrival_clock_time, current_hour, acuity)
+
 
             # Initialize a row for this patient in the DataFrame
             patient_row = [
-                self.arrival_time, self.day_of_arrival, self.arrival_clock_time, self.current_hour, 
+                arrival_time, 
+                day_of_arrival,
+                arrival_clock_time,
+                current_hour,
+                acuity,
                 0.0, 0.0, 0.0,                 # Triage-related columns
+                "", "",                            # Accepted for SDEC and Decision Reason
                 0.0, 0.0, 0.0,                      # ED Assessment-related columns
                 0.0, 0.0, 0.0, 0.0,                 # Referral-related columns
                 0.0, 0.0, 0.0, 0.0,                          # Medical Assessment-related columns
@@ -126,22 +149,22 @@ class Model:
             self.run_results_df.loc[patient.id] = patient_row
            
             # Record patient arrival
-            self.record_result(patient.id, "Simulation Arrival Time", self.arrival_time)
-            self.record_result(patient.id, "Day of Arrival", self.day_of_arrival)
-            self.record_result(patient.id, "Clock Hour of Arrival", self.arrival_clock_time)
-            self.record_result(patient.id, "Hour of Arrival", self.current_hour)
+            self.record_result(patient.id, "Simulation Arrival Time", patient.arrival_time)
+            self.record_result(patient.id, "Day of Arrival", patient.day_of_arrival)
+            self.record_result(patient.id, "Clock Hour of Arrival", patient.arrival_clock_time)
+            self.record_result(patient.id, "Hour of Arrival", patient.current_hour)
         
             # Use the helper function to extract the current hour from simulation time
             
             # Determine arrival rate based on the current hour
-            if 9 <= self.current_hour < 21:  # Peak hours (09:00 to 21:00)
+            if 9 <= current_hour < 21:  # Peak hours (09:00 to 21:00)
                 mean_interarrival_time = self.global_params.ed_peak_mean_patient_arrival_time
             else:  # Off-peak hours (21:00 to 09:00)
                 mean_interarrival_time = self.global_params.ed_off_peak_mean_patient_arrival_time
-    
+
             # start triage process
             self.env.process(self.triage(patient))
-            print(f"Patient {patient.id} arrives at {self.arrival_time}")
+            print(f"Patient {patient.id} arrives at {patient.arrival_time}")
 
             # Convert mean inter-arrival time to a rate
             arrival_rate = 1.0 / mean_interarrival_time
@@ -152,7 +175,7 @@ class Model:
 
     # Method to generate AMU beds
     def generate_amu_beds(self):
-        print(f"{self.env.now:.2f}: obstruct_consultant process started.")
+
         """Periodically release beds based on a Poisson distribution."""
         while True:
             # Sample time until next bed release using an exponential distribution
@@ -165,6 +188,47 @@ class Model:
                 self.total_beds_generated += 1  # Increment counter
                 print(f"Bed added to AMU at {self.env.now}. Total beds available: {len(self.amu_beds.items)}")
             else: print(f"No space to add more beds at {self.env.now}.")
+    
+    # Method to generate SDEC capacity
+    def generate_sdec_capacity(self):
+        while True:
+        # Determine if it's a weekend
+            current_day = calculate_day_of_week(self.env.now)  # e.g., "Monday", "Saturday"
+            is_weekend = current_day in ["Saturday", "Sunday"]
+
+             # Fetch the base capacity based on the day type
+            base_capacity = (
+                self.global_params.weekday_sdec_base_capacity if not is_weekend 
+                else self.global_params.weekend_sdec_base_capacity
+        )
+
+            # Add random noise to capacity
+            random_variation = random.randint(-2, 2)  # Random noise of ±2 slots
+            sdec_capacity = max(1, base_capacity + random_variation)  # Ensure capacity is non-negative
+
+            # Clear existing SDEC capacity
+            self.sdec_capacity.items = []  # Empty the store
+            for _ in range(sdec_capacity):  # Refill with new capacity
+                self.sdec_capacity.put("token")
+
+            print(f"SDEC capacity reset to {sdec_capacity} slots on {current_day} at time {self.env.now:.2f}.")
+
+            # Dynamically add slots throughout the day
+            while calculate_day_of_week(self.env.now) == current_day:  # Stay within the same day
+                # Sample time until the next slot release
+                sdec_capacity_release_interval = random.expovariate(1.0 / self.global_params.mean_sdec_capacity_release_interval)
+                yield self.env.timeout(sdec_capacity_release_interval)
+
+                # Add a slot if there's space in the store
+                if len(self.sdec_capacity.items) < self.sdec_capacity.capacity:
+                    self.sdec_capacity.put("token")
+                    print(f"Slot added to SDEC at {self.env.now:.2f}. Total slots available: {len(self.sdec_capacity.items)}")
+                else:
+                    print(f"No space to add more slots to SDEC at {self.env.now:.2f}.")
+
+                # Wait until the next day to reset the capacity
+                next_day_start = (self.env.now // 1440 + 1) * 1440
+                yield self.env.timeout(next_day_start - self.env.now)
     
     # Method to monitor the triage queue
     def monitor_triage_queue_length(self, interval=60):
@@ -261,6 +325,49 @@ class Model:
     
     # --- Processes (Patient Pathways) --- 
 
+    # Simulate referral to SDEC
+
+    def refer_to_sdec(self, patient, fallback_process):
+
+        """Simulate process of referral to SDEC"""
+
+        # Step 1: Check if SDEC is open
+        current_hour = extract_hour(self.env.now)
+        if current_hour < self.global_params.sdec_open_hour or current_hour >= self.global_params.sdec_close_hour:
+            self.record_result(patient.id, "SDEC Accepted", False)
+            self.record_result(patient.id, "SDEC Decision Reason", "Rejected: SDEC Closed")
+            yield self.env.process(fallback_process(patient)) # Route to the fallback process
+            return  # Route to the fallback process
+        
+        # Step 2: Check if the patient is eligible for SDEC
+        if patient.acuity != "low":  # Example eligibility criterion
+            self.record_result(patient.id, "SDEC Accepted", False)
+            self.record_result(patient.id, "SDEC Decision Reason", "Rejected: High Acuity")
+            yield self.env.process(fallback_process(patient))  # Route to the fallback process
+            return
+
+        # Step 3: Check if SDEC has capacity
+        if len(self.sdec_capacity.items) > 0:  # Capacity available
+            try:
+                sdec_capacity_token = yield self.sdec_capacity.get()  # Reserve one SDEC capacity token
+                
+                # Record acceptance in results
+                self.record_result(patient.id, "SDEC Accepted", True)
+                self.record_result(patient.id, "SDEC Decision Reason", "Accepted")
+                print(f"Patient {patient.id} referred to SDEC at hour {current_hour}.")
+        
+ 
+                # Process the patient in SDEC
+                yield self.env.process(self.sdec_process(patient, sdec_capacity_token))  # Process the patient in SDEC
+            except simpy.Interrupt:
+                print(f"Patient {patient.id}'s referral to SDEC was interrupted at hour {current_hour}.")
+                yield self.env.process(fallback_process(patient)) # Route to fallback process
+        else:
+            print(f"Patient {patient.id} could not be referred to SDEC due to no capacity at hour {current_hour}.")
+            yield self.env.process(fallback_process(patient))  # Route to fallback process
+
+    # Simulate triage process
+
     def triage(self, patient):
         
         """Simulate triage"""
@@ -280,7 +387,6 @@ class Model:
             triage_assessment_time = self.triage_time_distribution.sample()
             patient.triage_assessment_time = triage_assessment_time
         
-
             # Record the time spent with the triage nurse 
             yield self.env.timeout(triage_assessment_time)
             self.record_result(patient.id, "Triage Assessment Time", patient.triage_assessment_time)
@@ -289,8 +395,11 @@ class Model:
             patient.time_at_end_of_triage = self.env.now - patient.arrival_time
             self.record_result(patient.id, "Triage Complete", patient.time_at_end_of_triage)
 
-        # Proceed to ED assessment after triage
-        self.env.process(self.ed_assessment(patient))
+        
+        # Delegate to SDEC referral logic with ED assessment as fallback
+        self.env.process(self.refer_to_sdec(patient, self.ed_assessment))
+
+    # Simulate initial ED assessment
 
     def ed_assessment(self, patient):
 
@@ -317,7 +426,10 @@ class Model:
             self.record_result(patient.id, "Completed ED Assessment", time_at_end_of_ed_assessment)
             print(f"Patient {patient.id} completes ED assessment at {self.env.now}")
    
-        self.env.process(self.refer_to_medicine(patient))  # Proceed to referral  
+        # Delegate to SDEC referral logic with medical assessment as fallback
+        self.env.process(self.refer_to_sdec(patient, self.refer_to_medicine))
+
+    # Simulate referral to medicine
 
     def refer_to_medicine(self, patient):
         
@@ -352,6 +464,8 @@ class Model:
         self.env.process(self.initial_medical_assessment(patient)) # Continue medical assessment process in EDso t
         self.env.process(self.refer_to_amu_bed(patient))  # Start the process for AMU bed request
     
+    # Simulate request for AMU bed
+
     def refer_to_amu_bed(self, patient):
         """Request a bed for the patient if available, or wait for one."""
         print(f"Patient {patient.id} requesting AMU bed at {self.env.now}")
@@ -387,10 +501,11 @@ class Model:
     
         # Exit the process for the patient
    
+    # Simulate initial medical assessment process
+
     def initial_medical_assessment(self, patient):
         start_medical_queue_time = self.env.now
         print(f"{start_medical_queue_time:.2f}: Patient {patient.id} added to the medical queue.")
-
         with self.medical_doctor.request() as req:
             yield req  # Wait until medical staff is available
             
@@ -519,6 +634,50 @@ class Model:
         time_in_system = self.env.now - patient.arrival_time
         self.record_result(patient.id, "Time in System", time_in_system)
 
+    # SDEC process
+
+    def sdec_process(self, patient, sdec_token):
+
+        """Simulate the SDEC process for a patient
+            Parameters:
+            patient: The patient object being processed.
+            sdec_token: The capacity unit reserved for the patient in SDEC.
+        """
+
+        # Record the start time of the SDEC process
+        start_sdec_time = self.env.now
+       
+        # Simulate the actual triage assessment time using the lognormal distribution
+        sdec_assessment_time = self.sdec_time_distribution.sample()
+        patient.sdec_assessment_time = sdec_assessment_time 
+        yield self.env.timeout(sdec_assessment_time)
+
+        # Record the end time of the SDEC process
+        end_sdec_time = self.env.now
+
+        # Calculate and record the total time spent in SDEC
+        patient.sdec_duration = end_sdec_time - start_sdec_time
+        self.record_result(patient.id, "SDEC Duration", patient.sdec_duration)
+
+        # Return the capacity token to the SDEC store
+        self.sdec_capacity.put(sdec_token)
+        
+        # SDEC discharge decision 
+        if random.random() < 0.95:  # 95% chance to discharge
+            patient.discharged = True
+            patient.discharge_time = self.env.now
+            time_in_system = patient.discharge_time - patient.arrival_time
+
+            self.record_result(patient.id, "Time in System", time_in_system)
+            self.record_result(patient.id, "Discharge Time", patient.discharge_time)
+            self.record_result(patient.id, "Discharge Decision Point", "after_sdec_assessment")
+            print(f"Patient {patient.id} discharged at {patient.discharge_time} after sdec assessment")
+        else:
+            # Patient is not discharged, add to AMU bed queue
+            print(f"Patient {patient.id} requires an AMU bed after SDEC assessment.")
+            self.env.process(self.refer_to_amu_bed(patient))
+
+       
     # --- Run Method ---
 
     def run(self):
@@ -535,7 +694,10 @@ class Model:
         self.env.process(self.monitor_consultant_queue_length())
 
         # Start the AMU bed generation process
-        self.env.process(self.generate_amu_beds())  
+        self.env.process(self.generate_amu_beds())
+
+        # Start the SDEC capacity generation process 
+        self.env.process(self.generate_sdec_capacity()) 
 
         # Start monitoring the AMU bed queue
         self.env.process(self.monitor_amu_queue())

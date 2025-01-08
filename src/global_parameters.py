@@ -3,12 +3,20 @@
 class GlobalParameters:
     """Contains constants and parameters used across the simulation (e.g., arrival rates, service times)."""
     def __init__(self, 
+                 acuity_probabilities, 
                  ed_peak_mean_patient_arrival_time, 
                  ed_off_peak_mean_patient_arrival_time, 
                  triage_nurse_capacity, 
                  ed_doctor_capacity, 
                  medical_doctor_capacity, 
                  consultant_capacity, 
+                 mean_sdec_capacity_release_interval, 
+                 sdec_open_hour, 
+                 sdec_close_hour,
+                 weekday_sdec_base_capacity, 
+                 weekend_sdec_base_capacity, 
+                 max_sdec_capacity, 
+                 max_amu_available_beds,
                  mean_triage_assessment_time, 
                  stdev_triage_assessment_time,
                  mean_ed_assessment_time, 
@@ -18,15 +26,22 @@ class GlobalParameters:
                  mean_initial_medical_assessment_time, 
                  mean_consultant_assessment_time,
                  stdev_consultant_assessment_time, 
+                 mean_sdec_assessment_time,
+                 stdev_sdec_assessment_time,
+
                  ed_discharge_rate,
                  medicine_discharge_rate,
                  mean_amu_bed_release_interval,    
                  burn_in_time,
                  simulation_time):
         
+        # Acuity_probabilities
+
+        self.acuity_probabilities = acuity_probabilities
+
         # Define inter-arrival time
 
-        self.ed_peak_mean_patient_arrival_time = ed_peak_mean_patient_arrival_time # 09:00-21:00
+        self.ed_peak_mean_patient_arrival_time = ed_peak_mean_patient_arrival_time 
         self.ed_off_peak_mean_patient_arrival_time = ed_off_peak_mean_patient_arrival_time
 
          # Define the resources
@@ -36,7 +51,19 @@ class GlobalParameters:
         self.medical_doctor_capacity = medical_doctor_capacity
         self.consultant_capacity = consultant_capacity
     
-        # assessment times
+        # Define store values 
+
+        self.max_amu_available_beds = max_amu_available_beds # refers max available to transfer at any point (not total AMU capacity)
+        self.max_sdec_capacity = max_sdec_capacity # refers max available to transfer at any point (not total SDEC capacity)
+        self.mean_sdec_capacity_release_interval = mean_sdec_capacity_release_interval # refers to rate at which sdec slots open to ED referrals in the day
+
+        self.sdec_open_hour = sdec_open_hour   # SDEC opens at 08:00
+        self.sdec_close_hour = sdec_close_hour # SDEC stops accepting referrals at 18:00
+
+        self.weekday_sdec_base_capacity = weekday_sdec_base_capacity
+        self.weekend_sdec_base_capacity = weekend_sdec_base_capacity
+
+        # Assessment times
         
         self.mean_triage_assessment_time = mean_triage_assessment_time 
         self.stdev_triage_assessment_time = stdev_triage_assessment_time
@@ -53,7 +80,11 @@ class GlobalParameters:
         self.mean_consultant_assessment_time = mean_consultant_assessment_time
         self.stdev_consultant_assessment_time = stdev_consultant_assessment_time 
 
+        self.mean_sdec_assessment_time = mean_sdec_assessment_time
+        self.stdev_sdec_assessment_time = stdev_sdec_assessment_time
+
         # AMU bed release 
+
         self.mean_amu_bed_release_interval = mean_amu_bed_release_interval
         self.ed_discharge_rate = ed_discharge_rate
         self.medicine_discharge_rate = medicine_discharge_rate

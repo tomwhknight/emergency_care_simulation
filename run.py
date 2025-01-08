@@ -5,12 +5,29 @@ from src.trial import Trial
 
 if __name__ == "__main__":
     global_params = GlobalParameters(
+        
+        acuity_probabilities = {
+        "low": 0.3,     # 30% chance
+        "medium": 0.5,  # 50% chance
+        "high": 0.2     # 20% chance
+        },
+
         ed_peak_mean_patient_arrival_time = 3.2, 
         ed_off_peak_mean_patient_arrival_time= 9.6,
+        
         triage_nurse_capacity = 2,
         ed_doctor_capacity = 10,
         medical_doctor_capacity = 1,
         consultant_capacity = 1, 
+
+        sdec_open_hour = 8, 
+        sdec_close_hour = 18,
+
+        weekday_sdec_base_capacity = 7,
+        weekend_sdec_base_capacity = 5, 
+
+        max_amu_available_beds = 10,
+        max_sdec_capacity = 30,
 
         mean_triage_assessment_time = 7,
         stdev_triage_assessment_time = 2,
@@ -26,10 +43,15 @@ if __name__ == "__main__":
         mean_consultant_assessment_time = 25,
         stdev_consultant_assessment_time = 10, 
 
+        mean_sdec_assessment_time = 480,
+        stdev_sdec_assessment_time = 60,
+
         ed_discharge_rate = 0.05,
         medicine_discharge_rate = 0.5,
 
         mean_amu_bed_release_interval = 30,
+        mean_sdec_capacity_release_interval = 30,
+        
         simulation_time= 1440,
         burn_in_time = 0) # burn in to prevent initiation bias
         
