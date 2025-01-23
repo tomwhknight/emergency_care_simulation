@@ -16,7 +16,7 @@ if __name__ == "__main__":
         ed_off_peak_mean_patient_arrival_time= 9.6,
         
         triage_nurse_capacity = 2,
-        ed_doctor_capacity = 10,
+        ed_doctor_capacity = 37,
         medical_doctor_capacity = 1,
         consultant_capacity = 1, 
 
@@ -29,8 +29,8 @@ if __name__ == "__main__":
         max_amu_available_beds = 10,
         max_sdec_capacity = 30,
 
-        mean_triage_assessment_time = 7,
-        stdev_triage_assessment_time = 2,
+        mean_triage_assessment_time = 2.4,
+        stdev_triage_assessment_time = 0.6,
         
         mean_ed_assessment_time= 30,
         stdev_ed_assessment_time = 10, 
@@ -52,7 +52,7 @@ if __name__ == "__main__":
         mean_amu_bed_release_interval = 30,
         mean_sdec_capacity_release_interval = 30,
         
-        simulation_time= 1440,
+        simulation_time= 120,
         burn_in_time = 0) # burn in to prevent initiation bias
         
     trial = Trial(global_params)

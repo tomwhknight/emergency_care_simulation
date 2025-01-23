@@ -15,6 +15,9 @@ class Model:
         self.patient_counter = 0
         self.total_beds_generated = 0 
 
+        # Load CSV data
+        self.ed_staffing_data = pd.read_csv(self.global_params.ed_staffing_file)
+
         # Instantiate the Lognormal distribution for triage assessment time
         self.triage_time_distribution = Lognormal(mean=self.global_params.mean_triage_assessment_time,
                                                   stdev=self.global_params.stdev_triage_assessment_time)
@@ -78,7 +81,7 @@ class Model:
 
         # Create simpy resources for staffing levels
         self.triage_nurse = simpy.Resource(self.env, capacity=self.global_params.triage_nurse_capacity)
-        self.ed_doctor = simpy.Resource(self.env, capacity=self.global_params.ed_doctor_capacity)
+        self.ed_doctor = simpy.PriorityResource(self.env, capacity=self.global_params.ed_doctor_capacity)
         self.medical_doctor = simpy.Resource(self.env, capacity=self.global_params.medical_doctor_capacity)
         self.consultant = simpy.PriorityResource(self.env, capacity=self.global_params.consultant_capacity)
 
@@ -140,11 +143,7 @@ class Model:
                 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, '', 0.0,             # Consultant-related columns, Disposition, and Time in System
                 self.run_number                     # Run number
             ]
-
-            # Print the length of the row and the DataFrame to check for mismatches
-            print(f"Row length: {len(patient_row)}") 
-            print(f"Number of columns in run_results_df: {len(self.run_results_df.columns)}")  # Should also print 21
-          
+            
             # Record the patient data in the results DataFrame
             self.run_results_df.loc[patient.id] = patient_row
            
@@ -304,6 +303,8 @@ class Model:
             # Wait before checking again
             yield self.env.timeout(interval)
 
+    # --- Dynamic resource modelling ---
+
     # Method to model restricted consultant working hours 
     def obstruct_consultant(self):
         """Simulate consultant unavailability between 21:00 and 07:00."""
@@ -322,6 +323,37 @@ class Model:
 
             # Wait until the next hour to check again
             yield self.env.timeout(60)
+    
+    def obstruct_ed_doctor(self):
+        """Simulate ED doctor unavailability based on shift patterns."""
+        while True:
+            # Extract the current hour
+            current_hour = extract_hour(self.env.now)
+        
+            # Get the number of doctors available for the current hour
+            available_doctors = self.ed_staffing_data.loc[
+            self.ed_staffing_data['hour'] == current_hour, 'num_staff'
+            ].values[0]
+
+            # Calculate the number of doctors to block
+            doctors_to_block = self.ed_doctor.capacity - available_doctors
+
+            # Block excess doctors
+            if doctors_to_block > 0:
+                print(f"{self.env.now:.2f}: Blocking {doctors_to_block} doctors for hour {current_hour}.")
+                for _ in range(doctors_to_block):
+                    self.env.process(self.block_doctor(60))  # Block each doctor for 1 hour
+            else:
+                print(f"{self.env.now:.2f}: No blocking required; all doctors available.")
+
+            # Wait for the next hour to recheck staffing
+            yield self.env.timeout(60)
+
+    def block_doctor(self, block_duration):
+        """Simulate blocking a single doctor for a specific duration."""
+        with self.ed_doctor.request(priority=-1) as req:
+            yield req  # Acquire the resource to simulate it being blocked
+            yield self.env.timeout(block_duration)  # Simulate the blocking period
     
     # --- Processes (Patient Pathways) --- 
 
@@ -704,6 +736,9 @@ class Model:
 
         # Start the consultant obstruction process
         self.env.process(self.obstruct_consultant())
+
+        # Start the ED doctor obstruction process
+        self.env.process(self.obstruct_ed_doctor())
     
         # Run the simulation
         self.env.run(until=self.global_params.simulation_time)
