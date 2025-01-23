@@ -41,7 +41,6 @@ class Trial:
             # Concatenate queue monitoring data for this run to the aggregated DataFrame
             self.agg_triage_queue_monitoring_df = pd.concat([self.agg_triage_queue_monitoring_df, model.triage_queue_monitoring_df], ignore_index=True)
 
-
             # Add the 'Run Number' column to the consultant monitoring DataFrame
             model.consultant_queue_monitoring_df["Run Number"] = i + 1
 
