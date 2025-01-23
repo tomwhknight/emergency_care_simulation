@@ -36,7 +36,6 @@ class GlobalParameters:
                  burn_in_time,
                  simulation_time):
         
-        
         # Define the base project directory
 
            # Determine the project root directory (parent of src)
@@ -44,6 +43,7 @@ class GlobalParameters:
         
         # Define the file path relative to the project directory
         self.ed_staffing_file = os.path.join(self.project_dir, "data/staffing_resource/ed_staffing.csv")
+        self.medicine_staffing_file = os.path.join(self.project_dir, "data/staffing_resource/medicine_staffing.csv")
         
         # Acuity_probabilities
         self.acuity_probabilities = acuity_probabilities

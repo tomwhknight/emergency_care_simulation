@@ -17,6 +17,7 @@ class Model:
 
         # Load CSV data
         self.ed_staffing_data = pd.read_csv(self.global_params.ed_staffing_file)
+        self.medical_staffing_data = pd.read_csv(self.global_params.medicine_staffing_file)
 
         # Instantiate the Lognormal distribution for triage assessment time
         self.triage_time_distribution = Lognormal(mean=self.global_params.mean_triage_assessment_time,
@@ -82,7 +83,7 @@ class Model:
         # Create simpy resources for staffing levels
         self.triage_nurse = simpy.Resource(self.env, capacity=self.global_params.triage_nurse_capacity)
         self.ed_doctor = simpy.PriorityResource(self.env, capacity=self.global_params.ed_doctor_capacity)
-        self.medical_doctor = simpy.Resource(self.env, capacity=self.global_params.medical_doctor_capacity)
+        self.medical_doctor = simpy.PriorityResource(self.env, capacity=self.global_params.medical_doctor_capacity)
         self.consultant = simpy.PriorityResource(self.env, capacity=self.global_params.consultant_capacity)
 
         # Initialize the AMU bed container
@@ -143,7 +144,7 @@ class Model:
                 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, '', 0.0,             # Consultant-related columns, Disposition, and Time in System
                 self.run_number                     # Run number
             ]
-            
+
             # Record the patient data in the results DataFrame
             self.run_results_df.loc[patient.id] = patient_row
            
@@ -336,12 +337,12 @@ class Model:
             ].values[0]
 
             # Calculate the number of doctors to block
-            doctors_to_block = self.ed_doctor.capacity - available_doctors
+            ed_doctors_to_block = self.ed_doctor.capacity - available_doctors
 
             # Block excess doctors
-            if doctors_to_block > 0:
-                print(f"{self.env.now:.2f}: Blocking {doctors_to_block} doctors for hour {current_hour}.")
-                for _ in range(doctors_to_block):
+            if ed_doctors_to_block > 0:
+                print(f"{self.env.now:.2f}: Blocking {ed_doctors_to_block} doctors for hour {current_hour}.")
+                for _ in range(ed_doctors_to_block):
                     self.env.process(self.block_doctor(60))  # Block each doctor for 1 hour
             else:
                 print(f"{self.env.now:.2f}: No blocking required; all doctors available.")
@@ -355,6 +356,37 @@ class Model:
             yield req  # Acquire the resource to simulate it being blocked
             yield self.env.timeout(block_duration)  # Simulate the blocking period
     
+    def obstruct_medical_doctor(self):
+        while True:
+            # Extract the current hour
+            current_hour = extract_hour(self.env.now)
+
+            # Get the number of doctors available for the current hour
+            available_medical_doctors = self.medical_staffing_data.loc[
+            self.medical_staffing_data['hour'] == current_hour, 'num_staff'
+            ].values[0]
+
+            # Calculate the number of doctors to block
+            medical_doctors_to_block = self.medical_doctor.capacity - available_medical_doctors
+
+            # Block excess doctors
+            if medical_doctors_to_block > 0:
+                print(f"{self.env.now:.2f}: Blocking {medical_doctors_to_block} doctors for hour {current_hour}.")
+                for _ in range(medical_doctors_to_block):
+                    self.env.process(self.block_medical_doctor(60))  # Block each doctor for 1 hour
+            else:
+                print(f"{self.env.now:.2f}: No blocking required; all medical doctors available.")
+
+            # Wait for the next hour to recheck staffing
+            yield self.env.timeout(60)
+    
+    def block_medical_doctor(self, block_duration):
+        """Simulate blocking a medical doctor for a specific duration."""
+        with self.medical_doctor.request(priority=-1) as req:
+            yield req  # Acquire the resource to simulate it being blocked
+            yield self.env.timeout(block_duration)  # Simulate the blocking period
+    
+
     # --- Processes (Patient Pathways) --- 
 
     # Simulate referral to SDEC
@@ -591,7 +623,6 @@ class Model:
 
     # If not discharged, proceed to consultant assessment
         patient.discharged = False
-        print(f"Patient {patient.id} added to PTWR queue")
         self.env.process(self.consultant_assessment(patient))
         
     # Simulate consultant assessment process
@@ -739,6 +770,9 @@ class Model:
 
         # Start the ED doctor obstruction process
         self.env.process(self.obstruct_ed_doctor())
+
+         # Start the ED doctor obstruction process
+        self.env.process(self.obstruct_medical_doctor())
     
         # Run the simulation
         self.env.run(until=self.global_params.simulation_time)

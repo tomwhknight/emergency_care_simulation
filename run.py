@@ -17,7 +17,7 @@ if __name__ == "__main__":
         
         triage_nurse_capacity = 2,
         ed_doctor_capacity = 37,
-        medical_doctor_capacity = 1,
+        medical_doctor_capacity = 5,
         consultant_capacity = 1, 
 
         sdec_open_hour = 8, 
