@@ -5,20 +5,50 @@ from src.trial import Trial
 
 if __name__ == "__main__":
     global_params = GlobalParameters(
-        
-        acuity_probabilities = {
-        "low": 0.3,     # 30% chance
-        "medium": 0.5,  # 50% chance
-        "high": 0.2     # 20% chance
-        },
 
-        ed_peak_mean_patient_arrival_time = 3.2, 
-        ed_off_peak_mean_patient_arrival_time= 9.6,
+        # Arrival rates
+
+        ambulance_peak_mean_patient_arrival_time = 6.2, 
+        ambulance_off_peak_mean_patient_arrival_time= 9.2,
+
+        walk_in_peak_mean_patient_arrival_time = 3.2,
+        walk_in_off_peak_mean_patient_arrival_time = 6.4,
         
-        triage_nurse_capacity = 2,
+        # Patient characterstics 
+        
+        ambulance_acuity_probabilities = {
+        "1": 0.02,    
+        "2": 0.40,  
+        "3": 0.50,     
+        "4": 0.06,
+        "5": 0.02,
+        },  
+
+        walk_in_acuity_probabilities = {
+        "1": 0.01,    
+        "2": 0.18,  
+        "3": 0.40,     
+        "4": 0.30,
+        "5": 0.01,
+        },  
+
+        # Staffing resource
+
+        ambulance_triage_nurse_capacity = 1,
+        walk_in_triage_nurse_capacity = 2,
         ed_doctor_capacity = 37,
         medical_doctor_capacity = 5,
         consultant_capacity = 1, 
+
+        # Bed resource
+
+        num_ambulance_triage_bays = 4,
+        num_triage_rooms = 2, 
+        num_corridor_spaces = 15,
+        num_utc_rooms = 12, 
+        num_ed_majors_beds = 24, 
+
+        # SDEC capacity
 
         sdec_open_hour = 8, 
         sdec_close_hour = 18,
@@ -29,8 +59,8 @@ if __name__ == "__main__":
         max_amu_available_beds = 10,
         max_sdec_capacity = 30,
 
-        mean_triage_assessment_time = 2.4,
-        stdev_triage_assessment_time = 0.6,
+        mean_triage_assessment_time = 12.0,
+        stdev_triage_assessment_time = 7,
         
         mean_ed_assessment_time= 30,
         stdev_ed_assessment_time = 10, 
@@ -47,12 +77,13 @@ if __name__ == "__main__":
         stdev_sdec_assessment_time = 60,
 
         ed_discharge_rate = 0.05,
-        medicine_discharge_rate = 0.5,
+        medicine_discharge_rate = 0.10,
+        utc_discharge_prob = 0.9, 
 
         mean_amu_bed_release_interval = 30,
         mean_sdec_capacity_release_interval = 30,
         
-        simulation_time= 120,
+        simulation_time= 440,
         burn_in_time = 0) # burn in to prevent initiation bias
         
     trial = Trial(global_params)

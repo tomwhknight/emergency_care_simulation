@@ -4,13 +4,22 @@ import os
 class GlobalParameters:
     """Contains constants and parameters used across the simulation (e.g., arrival rates, service times)."""
     def __init__(self, 
-                 acuity_probabilities, 
-                 ed_peak_mean_patient_arrival_time, 
-                 ed_off_peak_mean_patient_arrival_time, 
-                 triage_nurse_capacity, 
+                 ambulance_acuity_probabilities, 
+                 walk_in_acuity_probabilities,
+                 ambulance_peak_mean_patient_arrival_time, 
+                 ambulance_off_peak_mean_patient_arrival_time,
+                 walk_in_peak_mean_patient_arrival_time,
+                 walk_in_off_peak_mean_patient_arrival_time, 
+                 ambulance_triage_nurse_capacity,
+                 walk_in_triage_nurse_capacity,  
                  ed_doctor_capacity, 
                  medical_doctor_capacity, 
                  consultant_capacity, 
+                 num_ambulance_triage_bays,
+                 num_triage_rooms, 
+                 num_corridor_spaces,
+                 num_utc_rooms, 
+                 num_ed_majors_beds,
                  mean_sdec_capacity_release_interval, 
                  sdec_open_hour, 
                  sdec_close_hour,
@@ -29,8 +38,8 @@ class GlobalParameters:
                  stdev_consultant_assessment_time, 
                  mean_sdec_assessment_time,
                  stdev_sdec_assessment_time,
-
                  ed_discharge_rate,
+                 utc_discharge_prob, 
                  medicine_discharge_rate,
                  mean_amu_bed_release_interval,    
                  burn_in_time,
@@ -38,26 +47,41 @@ class GlobalParameters:
         
         # Define the base project directory
 
-           # Determine the project root directory (parent of src)
+         # Determine the project root directory (parent of src)
         self.project_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
         
         # Define the file path relative to the project directory
         self.ed_staffing_file = os.path.join(self.project_dir, "data/staffing_resource/ed_staffing.csv")
         self.medicine_staffing_file = os.path.join(self.project_dir, "data/staffing_resource/medicine_staffing.csv")
         
-        # Acuity_probabilities
-        self.acuity_probabilities = acuity_probabilities
+        # Patient characterietics
+        self.ambulance_acuity_probabilities = ambulance_acuity_probabilities
+        self.walk_in_acuity_probabilities = walk_in_acuity_probabilities
 
         # Define inter-arrival time
-        self.ed_peak_mean_patient_arrival_time = ed_peak_mean_patient_arrival_time 
-        self.ed_off_peak_mean_patient_arrival_time = ed_off_peak_mean_patient_arrival_time
+        self.ambulance_peak_mean_patient_arrival_time = ambulance_peak_mean_patient_arrival_time 
+        self.ambulance_off_peak_mean_patient_arrival_time = ambulance_off_peak_mean_patient_arrival_time
 
-         # Define the resources
-        self.triage_nurse_capacity = triage_nurse_capacity
+        self.walk_in_peak_mean_patient_arrival_time = walk_in_peak_mean_patient_arrival_time
+        self.walk_in_off_peak_mean_patient_arrival_time = walk_in_off_peak_mean_patient_arrival_time
+
+        # Define the resources
+
+        self.ambulance_triage_nurse_capacity = ambulance_triage_nurse_capacity
+        self.walk_in_triage_nurse_capacity = walk_in_triage_nurse_capacity
         self.ed_doctor_capacity = ed_doctor_capacity
         self.medical_doctor_capacity = medical_doctor_capacity
         self.consultant_capacity = consultant_capacity
-    
+
+        # Triage capacity settings
+        self.num_ambulance_triage_bays = num_ambulance_triage_bays   # Number of bays for triage
+        self.num_corridor_spaces = num_corridor_spaces # Max patients in the corridor
+        self.num_triage_rooms = num_triage_rooms
+        self.num_utc_rooms = num_utc_rooms
+        self.num_ed_majors_beds = num_ed_majors_beds 
+
+        self.utc_discharge_prob = utc_discharge_prob
+
         # Define store values 
         self.max_amu_available_beds = max_amu_available_beds # refers max available to transfer at any point (not total AMU capacity)
         self.max_sdec_capacity = max_sdec_capacity # refers max available to transfer at any point (not total SDEC capacity)

@@ -42,12 +42,16 @@ class Model:
             "Day of Arrival", 
             "Clock Hour of Arrival", 
             "Hour of Arrival",
-            "Acuity",  
-            "Wait for Triage Nurse", 
-            "Triage Assessment Time", 
+            "Mode of Arrival",
+            "Acuity", 
+            "Triage Location", 
+            "Wait for Triage Space", 
+            "Wait for Triage Nurse",
+            "Triage Nurse Assessment Time", 
             "Triage Complete", 
             "SDEC Accepted",
             "SDEC Decision Reason", 
+            "Arrival to ED Majors Bed",
             "ED Assessment Start Time", 
             "ED Assessment Time", 
             "Completed ED Assessment",
@@ -81,7 +85,18 @@ class Model:
         self.amu_queue_df = pd.DataFrame(columns=["Patient ID", "Time Joined AMU Queue", "Time Admitted to AMU"])
 
         # Create simpy resources for staffing levels
-        self.triage_nurse = simpy.Resource(self.env, capacity=self.global_params.triage_nurse_capacity)
+        self.ambulance_triage_nurse = simpy.Resource(self.env, capacity=self.global_params.ambulance_triage_nurse_capacity)
+        self.walk_in_triage_nurse = simpy.Resource(self.env, capacity = self.global_params.walk_in_triage_nurse_capacity)
+        self.ambulance_triage_bay = simpy.Resource(self.env, capacity=self.global_params.num_ambulance_triage_bays)
+        self.triage_room = simpy.Resource(self.env, capacity = self.global_params.num_triage_rooms)
+        self.triage_corridor = simpy.Resource(self.env, capacity=self.global_params.num_corridor_spaces)
+        
+
+        # Create ED Majors Beds
+        self.utc_rooms = simpy.Resource(self.env, capacity=self.global_params.num_utc_rooms)
+        self.ed_majors_bed = simpy.Resource(self.env, capacity=self.global_params.num_ed_majors_beds)
+
+        # Create simpy resources for ED clinical assessment
         self.ed_doctor = simpy.PriorityResource(self.env, capacity=self.global_params.ed_doctor_capacity)
         self.medical_doctor = simpy.PriorityResource(self.env, capacity=self.global_params.medical_doctor_capacity)
         self.consultant = simpy.PriorityResource(self.env, capacity=self.global_params.consultant_capacity)
@@ -105,7 +120,7 @@ class Model:
     # --- Generator Methods ---
 
     # Method to generate patient arrivals
-    def generate_patient_arrivals(self):
+    def generate_ambulance_arrivals(self):
 
         """Generate patient arrivals based on inter-arrival times."""
         
@@ -114,20 +129,21 @@ class Model:
             arrival_time = self.env.now
             
             # Add time variables
-            
             arrival_clock_time = calculate_hour_of_day(arrival_time)
             day_of_arrival = calculate_day_of_week(arrival_time)
             current_hour = extract_hour(arrival_time)
 
+            # Explicitly assign mode of arrival
+            mode_of_arrival = "Ambulance"
+
             # Assign acuity level based on probabilities from GlobalParameters
             
-            acuity_levels = list(self.global_params.acuity_probabilities.keys())
-            acuity_weights = list(self.global_params.acuity_probabilities.values())
-            acuity = random.choices(acuity_levels, weights=acuity_weights, k=1)[0]
+            ambulance_acuity_levels = list(self.global_params.ambulance_acuity_probabilities.keys())
+            ambulance_acuity_weights = list(self.global_params.ambulance_acuity_probabilities.values())
+            acuity = random.choices(ambulance_acuity_levels, weights=ambulance_acuity_weights, k=1)[0]
             
-             # Create instance of patient class using
-            patient = Patient(self.patient_counter, arrival_time, day_of_arrival, arrival_clock_time, current_hour, acuity)
-
+            # Create instance of patient class using
+            patient = Patient(self.patient_counter, arrival_time, day_of_arrival, arrival_clock_time, current_hour, mode_of_arrival, acuity)
 
             # Initialize a row for this patient in the DataFrame
             patient_row = [
@@ -135,15 +151,47 @@ class Model:
                 day_of_arrival,
                 arrival_clock_time,
                 current_hour,
-                acuity,
-                0.0, 0.0, 0.0,                 # Triage-related columns
-                "", "",                            # Accepted for SDEC and Decision Reason
-                0.0, 0.0, 0.0,                      # ED Assessment-related columns
-                0.0, 0.0, 0.0, 0.0,                 # Referral-related columns
-                0.0, 0.0, 0.0, 0.0,                          # Medical Assessment-related columns
-                0.0, 0.0, 0.0, 0.0, 0.0, 0.0, '', 0.0,             # Consultant-related columns, Disposition, and Time in System
+                mode_of_arrival,
+                acuity, 
+                "", 0.0, 0.0, 0.0, 0.0, # Triage-related columns
+                "", "",       # Accepted for SDEC and Decision Reason                       
+                0.0,                              # Time to ED majors bed                          
+                0.0, 0.0, 0.0, 0.0,                     # ED Assessment-related columns
+                0.0, 0.0,                           # Referral-related columns
+                0.0, 0.0,                           # AMU related columns
+                0.0, 0.0, 0.0, 0.0,              # Medical Assessment-related columns
+                0.0, 0.0, 0.0, 0.0, 0.0,   # Consultant-related columns, 
+                '', 0.0,                    # Disposition, and Time in System
                 self.run_number                     # Run number
             ]
+
+
+            print(f"Expected columns in DataFrame: {len(self.run_results_df.columns)}")
+            print(f"Provided values in patient_row: {len(patient_row)}")
+
+        # Compare DataFrame columns with patient_row values
+            if len(self.run_results_df.columns) != len(patient_row):
+                print("\n⚠️ Mismatch Detected! Columns do not match the values provided in patient_row.")
+            
+                # Identify which columns are missing or extra
+                expected_cols = list(self.run_results_df.columns)
+                provided_values = [type(val).__name__ for val in patient_row]  # Get value types for reference
+
+                print("\n🔍 Column-by-Column Comparison:")
+                for i, (col, val) in enumerate(zip(expected_cols, patient_row)):
+                    print(f"Column {i}: {col} -> Provided Value Type: {provided_values[i]}")
+
+                # Identify missing columns
+                if len(self.run_results_df.columns) > len(patient_row):
+                    print("\nMissing Values for Columns:")
+                    print(expected_cols[len(patient_row):])  # Show missing column names
+
+                # Identify extra values
+                if len(self.run_results_df.columns) < len(patient_row):
+                    print("\n Extra Values in patient_row (should not be included):")
+                    print(patient_row[len(expected_cols):])  # Show extra values
+
+                print("\n")
 
             # Record the patient data in the results DataFrame
             self.run_results_df.loc[patient.id] = patient_row
@@ -152,18 +200,16 @@ class Model:
             self.record_result(patient.id, "Simulation Arrival Time", patient.arrival_time)
             self.record_result(patient.id, "Day of Arrival", patient.day_of_arrival)
             self.record_result(patient.id, "Clock Hour of Arrival", patient.arrival_clock_time)
-            self.record_result(patient.id, "Hour of Arrival", patient.current_hour)
-        
-            # Use the helper function to extract the current hour from simulation time
-            
+            self.record_result(patient.id, "Hour of Arrival", patient.current_hour)     
+
             # Determine arrival rate based on the current hour
             if 9 <= current_hour < 21:  # Peak hours (09:00 to 21:00)
-                mean_interarrival_time = self.global_params.ed_peak_mean_patient_arrival_time
+                mean_interarrival_time = self.global_params.ambulance_peak_mean_patient_arrival_time
             else:  # Off-peak hours (21:00 to 09:00)
-                mean_interarrival_time = self.global_params.ed_off_peak_mean_patient_arrival_time
+                mean_interarrival_time = self.global_params.ambulance_off_peak_mean_patient_arrival_time
 
             # start triage process
-            self.env.process(self.triage(patient))
+            self.env.process(self.ambulance_triage(patient))
             print(f"Patient {patient.id} arrives at {patient.arrival_time}")
 
             # Convert mean inter-arrival time to a rate
@@ -172,6 +218,83 @@ class Model:
             # Sample the inter-arrival time using an exponential distribution
             ED_inter_arrival_time = random.expovariate(arrival_rate) 
             yield self.env.timeout(ED_inter_arrival_time)
+
+    def generate_walk_in_arrivals(self):
+        """Generate walk-in patient arrivals based on inter-arrival times."""
+    
+        while True:
+            self.patient_counter += 1  # Shared counter across generators
+            arrival_time = self.env.now
+        
+            # Add time variables
+            arrival_clock_time = calculate_hour_of_day(arrival_time)
+            day_of_arrival = calculate_day_of_week(arrival_time)
+            current_hour = extract_hour(arrival_time)
+
+            # Explicitly assign mode of arrival
+            mode_of_arrival = "Walk-in"
+
+            # Assign acuity level based on probabilities from GlobalParameters
+            walk_in_acuity_levels = list(self.global_params.walk_in_acuity_probabilities.keys())
+            walk_in_acuity_weights = list(self.global_params.walk_in_acuity_probabilities.values())
+            acuity = random.choices(walk_in_acuity_levels, weights=walk_in_acuity_weights, k=1)[0]
+
+            # Create instance of patient class
+            patient = Patient(
+            self.patient_counter,
+            arrival_time,
+            day_of_arrival,
+            arrival_clock_time,
+            current_hour,
+            mode_of_arrival,
+            acuity
+            )
+
+            # Initialize a row for this patient in the DataFrame
+            patient_row = [
+            arrival_time,
+            day_of_arrival,
+            arrival_clock_time,
+            current_hour,
+            mode_of_arrival,
+            acuity,
+            "", 0.0, 0.0, 0.0, 0.0,  # Triage-related columns
+            "", "",  # Accepted for SDEC and Decision Reason                       
+            0.0,  # Time to ED majors bed                          
+            0.0, 0.0, 0.0, 0.0,  # ED Assessment-related columns
+            0.0, 0.0,  # Referral-related columns
+            0.0, 0.0,  # AMU related columns
+            0.0, 0.0, 0.0, 0.0,  # Medical Assessment-related columns
+            0.0, 0.0, 0.0, 0.0, 0.0,  # Consultant-related columns
+            '', 0.0,  # Disposition, and Time in System
+            self.run_number  # Run number
+        ]
+
+            # Record the patient data in the results DataFrame
+            self.run_results_df.loc[patient.id] = patient_row
+
+            # Record patient arrival
+            self.record_result(patient.id, "Simulation Arrival Time", patient.arrival_time)
+            self.record_result(patient.id, "Day of Arrival", patient.day_of_arrival)
+            self.record_result(patient.id, "Clock Hour of Arrival", patient.arrival_clock_time)
+            self.record_result(patient.id, "Hour of Arrival", patient.current_hour)
+
+            # Determine arrival rate based on the current hour
+            if 9 <= current_hour < 21:  # Peak hours (09:00 to 21:00)
+                mean_interarrival_time = self.global_params.walk_in_peak_mean_patient_arrival_time
+            else:  # Off-peak hours (21:00 to 09:00)
+                mean_interarrival_time = self.global_params.walk_in_off_peak_mean_patient_arrival_time
+
+            # Start walk-in triage process
+            self.env.process(self.walk_in_triage(patient))
+            print(f"Walk-in Patient {patient.id} arrives at {patient.arrival_time}")
+
+            # Convert mean inter-arrival time to a rate
+            arrival_rate = 1.0 / mean_interarrival_time
+
+            # Sample the inter-arrival time using an exponential distribution
+            walk_in_inter_arrival_time = random.expovariate(arrival_rate)
+            yield self.env.timeout(walk_in_inter_arrival_time)
 
     # Method to generate AMU beds
     def generate_amu_beds(self):
@@ -236,7 +359,7 @@ class Model:
         while True:
             # Record the current time and queue length
             current_time = self.env.now
-            queue_length = len(self.triage_nurse.queue)
+            queue_length = len(self.ambulance_triage_nurse.queue)
             hour_of_day = (current_time // 60) % 24
             # Create a new DataFrame for the current row
             new_row = pd.DataFrame({
@@ -286,7 +409,7 @@ class Model:
             yield self.env.timeout(interval)
 
     # Method to track AMU queue
-    def monitor_amu_queue(self, interval=10):
+    def monitor_amu_queue(self, interval=15):
         """Monitor the AMU bed queue length at regular intervals."""
         while True:
             current_time = self.env.now
@@ -306,7 +429,7 @@ class Model:
 
     # --- Dynamic resource modelling ---
 
-    # Method to model restricted consultant working hours 
+    # Method to model consultant working hours 
     def obstruct_consultant(self):
         """Simulate consultant unavailability between 21:00 and 07:00."""
         while True:
@@ -325,6 +448,7 @@ class Model:
             # Wait until the next hour to check again
             yield self.env.timeout(60)
     
+    # Method to model ED doctor working hours
     def obstruct_ed_doctor(self):
         """Simulate ED doctor unavailability based on shift patterns."""
         while True:
@@ -341,7 +465,7 @@ class Model:
 
             # Block excess doctors
             if ed_doctors_to_block > 0:
-                print(f"{self.env.now:.2f}: Blocking {ed_doctors_to_block} doctors for hour {current_hour}.")
+                print(f"{self.env.now:.2f}: Blocking {ed_doctors_to_block} ED doctors for hour {current_hour}.")
                 for _ in range(ed_doctors_to_block):
                     self.env.process(self.block_doctor(60))  # Block each doctor for 1 hour
             else:
@@ -350,12 +474,14 @@ class Model:
             # Wait for the next hour to recheck staffing
             yield self.env.timeout(60)
 
+    # Method to block ED doctor 
     def block_doctor(self, block_duration):
         """Simulate blocking a single doctor for a specific duration."""
         with self.ed_doctor.request(priority=-1) as req:
             yield req  # Acquire the resource to simulate it being blocked
             yield self.env.timeout(block_duration)  # Simulate the blocking period
     
+    # Method to model medical doctor working hours
     def obstruct_medical_doctor(self):
         while True:
             # Extract the current hour
@@ -371,7 +497,7 @@ class Model:
 
             # Block excess doctors
             if medical_doctors_to_block > 0:
-                print(f"{self.env.now:.2f}: Blocking {medical_doctors_to_block} doctors for hour {current_hour}.")
+                print(f"{self.env.now:.2f}: Blocking {medical_doctors_to_block} Medical doctors for hour {current_hour}.")
                 for _ in range(medical_doctors_to_block):
                     self.env.process(self.block_medical_doctor(60))  # Block each doctor for 1 hour
             else:
@@ -380,13 +506,13 @@ class Model:
             # Wait for the next hour to recheck staffing
             yield self.env.timeout(60)
     
+    # Method to block medical doctor
     def block_medical_doctor(self, block_duration):
         """Simulate blocking a medical doctor for a specific duration."""
         with self.medical_doctor.request(priority=-1) as req:
             yield req  # Acquire the resource to simulate it being blocked
             yield self.env.timeout(block_duration)  # Simulate the blocking period
     
-
     # --- Processes (Patient Pathways) --- 
 
     # Simulate referral to SDEC
@@ -432,43 +558,252 @@ class Model:
 
     # Simulate triage process
 
-    def triage(self, patient):
-        
-        """Simulate triage"""
-        
-        start_triage_q = self.env.now
-        with self.triage_nurse.request() as req:
-            yield req  # Wait until a triage is available
-        
-            # Time triage assessment begins
-            start_triage_time = self.env.now
-            patient.wait_time_for_triage_nurse = start_triage_time - start_triage_q
-            
-            # Record the time spent waiting for triage and when triage starts
-            self.record_result(patient.id, "Wait for Triage Nurse", patient.wait_time_for_triage_nurse)
+    def ambulance_triage(self, patient):
+        """Simulate ambulance triage, requiring a triage nurse and either a bay or corridor before assessment."""
+        start_triage_nurse_q = self.env.now  # Start tracking wait time for triage space
+        start_triage_cubicle_q = self.env.now
 
-            # Simulate the actual triage assessment time using the lognormal distribution
-            triage_assessment_time = self.triage_time_distribution.sample()
-            patient.triage_assessment_time = triage_assessment_time
-        
-            # Record the time spent with the triage nurse 
-            yield self.env.timeout(triage_assessment_time)
-            self.record_result(patient.id, "Triage Assessment Time", patient.triage_assessment_time)
-        
-            # Calculate and record the total time from arrival to the end of triage
-            patient.time_at_end_of_triage = self.env.now - patient.arrival_time
-            self.record_result(patient.id, "Triage Complete", patient.time_at_end_of_triage)
+        # Step 1: Request both a triage bay and a corridor, plus a triage nurse
+        triage_bay_req = self.ambulance_triage_bay.request()
+        ambulance_triage_nurse_req = self.ambulance_triage_nurse.request()
 
-        
-        # Delegate to SDEC referral logic with ED assessment as fallback
-        self.env.process(self.refer_to_sdec(patient, self.ed_assessment))
+        # Wait until a triage nurse is available AND either a triage bay or a corridor
+        triage_resources = yield self.env.any_of([triage_bay_req, ambulance_triage_nurse_req])
 
-    # Simulate initial ED assessment
+        # Create a resource list
+        triage_resource_list = list(triage_resources.keys())
+
+        if len(triage_resource_list) < 2:  # Check if both resources were acquired
+            # Work out which resource is missing and wait for that one
+            got_resource = triage_resource_list[0]
+
+            if got_resource == triage_bay_req:
+                # Got the triage bay first, now wait for the nurse
+                end_q_cubicle = self.env.now
+                yield ambulance_triage_nurse_req  # Wait for nurse to become available
+                end_q_nurse = self.env.now
+            else:
+                # We got the nurse first, now wait for the triage bay
+                end_q_nurse = self.env.now
+                yield triage_bay_req  # Wait for triage bay to become available
+                end_q_cubicle = self.env.now
+
+        else:
+            # Both resources were acquired simultaneously
+            end_q_cubicle = self.env.now
+            end_q_nurse = self.env.now
+
+        # Record the wait times for both resources (triage space and nurse)
+        patient.wait_time_for_triage_nurse = end_q_nurse - start_triage_nurse_q
+        patient.wait_time_for_triage_space = end_q_cubicle - start_triage_cubicle_q
+        self.record_result(patient.id, "Wait for Triage Nurse", patient.wait_time_for_triage_nurse)
+        self.record_result(patient.id, "Wait for Triage Space", patient.wait_time_for_triage_space)
+
+        # Step 4: Determine which triage space became available
+        if triage_bay_req in triage_resource_list:
+            patient.triage_location = "ambulance_triage_bay"  # Assign triage location as ambulance triage bay
+            patient.triage_bay_request = triage_bay_req  # Store request for later release
+            print(f"Patient {patient.id} assigned to ambulance triage bay.")
+            self.record_result(patient.id, "Triage Location", patient.triage_location)
+
+
+        # Step 4: Perform triage assessment (simulated by a random time)
+        triage_assessment_time = self.triage_time_distribution.sample()
+        yield self.env.timeout(triage_assessment_time)
+        self.record_result(patient.id, "Triage Nurse Assessment Time", triage_assessment_time)
+        print(f"Triage assessment completed for Patient {patient.id} in {patient.triage_location}.")
+        self.ambulance_triage_nurse.release(ambulance_triage_nurse_req)
+
+        # Step 5: Record completion time & release the triage nurse
+        patient.time_at_end_of_triage = self.env.now - patient.arrival_time
+        self.record_result(patient.id, "Triage Complete", patient.time_at_end_of_triage)
+
+        # Proceed with ED assessment and check for ED Majors bed
+        self.env.process(self.ed_assessment(patient))
+        self.env.process(self.check_and_assign_majors_bed(patient))
+
+    def walk_in_triage(self, patient):
+        """Simulate walk-in triage, requiring a triage nurse and a triage room before assessment."""
+    
+        start_triage_nurse_q = self.env.now  # Start tracking wait time for triage nurse
+        start_triage_room_q = self.env.now  # Start tracking wait time for triage room
+
+        # Step 1: Request both a triage room and a triage nurse
+        triage_room_req = self.triage_room.request()
+        walk_in_triage_nurse_req = self.walk_in_triage_nurse.request()
+
+        # Step 2: Wait until both resources are available
+        walk_in_triage_resources = yield self.env.all_of([walk_in_triage_nurse_req, triage_room_req])
+
+        # Step 3: Create a resource list
+        walk_in_triage_resource_list = list(walk_in_triage_resources.keys())
+
+        if len(walk_in_triage_resource_list) < 2:  # If only one resource is acquired, wait for the other
+            got_resource = walk_in_triage_resource_list[0]  # Identify which was obtained first
+
+            if got_resource == triage_room_req:
+                end_q_room = self.env.now
+                yield walk_in_triage_nurse_req  # Wait for triage nurse to become available
+                end_q_nurse = self.env.now
+            else:
+                end_q_nurse = self.env.now
+                yield triage_room_req  # Wait for triage room to become available
+                end_q_room = self.env.now
+        else:
+            # Both resources acquired at the same time
+            end_q_room = self.env.now
+            end_q_nurse = self.env.now
+        
+        # Step 4: Record wait times
+       
+        patient.wait_time_for_triage_nurse = end_q_nurse - start_triage_nurse_q
+        patient.wait_time_for_triage_room = end_q_room - start_triage_room_q
+
+        self.record_result(patient.id, "Wait for Triage Nurse", patient.wait_time_for_triage_nurse)
+        self.record_result(patient.id, "Wait for Triage Space", patient.wait_time_for_triage_room)
+        print(f"Patient {patient.id} assigned to triage room at {self.env.now}")
+
+        # Assign and record the triage location
+        patient.triage_location = "triage_room"
+        self.record_result(patient.id, "Triage Location", patient.triage_location)
+
+        # Step 3: Perform triage assessment (simulated by a random time)
+        triage_assessment_time = self.triage_time_distribution.sample()
+        yield self.env.timeout(triage_assessment_time)
+        self.record_result(patient.id, "Triage Nurse Assessment Time", triage_assessment_time)
+        print(f"Triage assessment completed for Patient {patient.id} in triage room.")
+
+        # Step 4: Release triage room (triage nurse remains with the patient)
+        self.triage_room.release(triage_room_req)
+        print(f"Patient {patient.id} released triage room at {self.env.now}")
+
+        # Step 5: Decide next steps
+        if patient.acuity in [1, 2]:
+             print(f"Patient {patient.id} escalated to ED Majors.")
+             self.env.process(self.check_and_assign_majors_bed(patient)) 
+             self.env.process(self.ed_assessment(patient))  
+
+        else:
+            print(f"Patient {patient.id} returns to waiting room")
+            self.env.process(self.utc_assessment(patient))  # Continue in waiting room
+        # Step 6: Release triage nurse after decision
+        self.walk_in_triage_nurse.release(walk_in_triage_nurse_req)
+
+        # Step 6: All patients proceed to ED assessment (Majors, UTC, or waiting)
+        self.env.process(self.ed_assessment(patient))
+
+
+    # Simulate UTC
+
+    def utc_assessment(self, patient):
+        """Simulate UTC assessment, requiring both an ED doctor and a UTC room before assessment."""
+    
+        start_utc_room_q = self.env.now  # Track UTC room queue time
+        start_ed_doctor_q = self.env.now  # Track ED doctor queue time
+
+        # Step 1: Request both UTC room and ED doctor
+        utc_room_req = self.utc_rooms.request()
+        ed_doctor_req = self.ed_doctor.request()
+
+        # Step 2: Wait until at least one resource is available
+        utc_resources = yield self.env.any_of([utc_room_req, ed_doctor_req])
+
+        # Step 3: Create resource list
+        utc_resource_list = list(utc_resources.keys())
+
+        if len(utc_resource_list) < 2:  # Check if both resources were acquired
+            got_resource = utc_resource_list[0]  # Identify which resource was obtained first
+
+            if got_resource == utc_room_req:
+                # If UTC room was obtained first, wait for the ED doctor
+                end_utc_room_q = self.env.now
+                yield ed_doctor_req
+                end_ed_doctor_q = self.env.now
+            else:
+                # If ED doctor was obtained first, wait for the UTC room
+                end_ed_doctor_q = self.env.now
+                yield utc_room_req
+                end_utc_room_q = self.env.now
+        else:
+            # Both resources were acquired simultaneously
+            end_utc_room_q = self.env.now
+            end_ed_doctor_q = self.env.now
+
+        # Step 4: Record queue times
+        patient.wait_time_for_utc_room = end_utc_room_q - start_utc_room_q
+        patient.wait_time_for_ed_doctor = end_ed_doctor_q - start_ed_doctor_q
+        self.record_result(patient.id, "Wait for UTC Room", patient.wait_time_for_utc_room)
+        self.record_result(patient.id, "Wait for ED Doctor", patient.wait_time_for_ed_doctor)
+        print(f"Patient {patient.id} assigned to UTC room and ED doctor at {self.env.now}")
+
+        # Step 5: ED assessment
+        yield self.env.process(self.ed_assessment(patient))
+        print(f"UTC assessment completed for Patient {patient.id} at {self.env.now}.")
+
+        # Step 6: Decision after assessment
+        if patient.discharged:
+            patient.discharged = True
+            patient.discharge_time = self.env.now
+            self.record_result(patient.id, "Discharge Time", patient.discharge_time)
+            time_in_system = patient.discharge_time - patient.arrival_time
+            self.record_result(patient.id, "Time in System", time_in_system)
+            self.record_result(patient.id, "Discharge Decision Point", "ed_discharge")
+            print(f"Patient {patient.id} discharged from UTC at {self.env.now}.")
+        
+            # Release both UTC space and ED doctor
+            self.utc_rooms.release(utc_room_req)
+            self.ed_doctor.release(ed_doctor_req)
+            return  # End process for discharged patients
+    
+        # Release only the ED doctor, but **keep the UTC room**
+        self.ed_doctor.release(ed_doctor_req)
+
+        # Start referral process while keeping the UTC bed
+        self.env.process(self.refer_to_medicine(patient))
+    
+    
+        # Step 7: If patient is waiting for an ED Majors bed or AMU, they continue occupying UTC space
+        while not patient.discharged and not patient.transferred_to_amu:
+            yield self.env.timeout(15)  # Check status every 15 minutes
+
+        # Step 8: Release UTC room and ED doctor when the patient moves on
+        self.utc_rooms.release(utc_room_req)
+        self.ed_doctor.release(ed_doctor_req)
+        print(f"Patient {patient.id} leaving UTC space at {self.env.now}.")
+
+    # Simulate transfer to ED Majors    
+
+    def check_and_assign_majors_bed(self, patient):
+        """Check and assign ED Majors bed to patient if available, regardless of ED assessment status."""
+        print(f"Patient {patient.id} checking for ED Majors bed at {self.env.now}")
+
+        # Step 1: Request an ED Majors bed
+        with self.ed_majors_bed.request() as maj_bed_req:
+            yield maj_bed_req  # Wait for an ED bed to become available
+
+            # Step 2: Move patient to ED Majors bed
+            patient.time_to_ed_majors_bed = self.env.now - patient.arrival_time
+            self.record_result(patient.id, "Arrival to ED Majors Bed", patient.time_to_ed_majors_bed)
+            print(f"Patient {patient.id} assigned to ED Majors bed at {self.env.now}.")
+
+            # Step 3: Release the triage bay
+            self.ambulance_triage_bay.release(patient.triage_bay_request)  # Release the ambulance triage bay
+            print(f"Patient {patient.id} released ambulance triage bay.")
+           
+                # Step 4: Patient remains in ED Majors bed until discharged or admitted to AMU
+            while not patient.discharged and not patient.transferred_to_amu:
+                yield self.env.timeout(15)  # Check every 1 time unit if the patient is ready to move
+
+            # Step 5: Release the bed when the patient is discharged or transferred
+            print(f"Patient {patient.id} leaving ED Majors bed at {self.env.now} (Discharged: {patient.discharged}, AMU Transfer: {patient.transferred_to_amu}).")
+            self.ed_majors_bed.release(maj_bed_req)  # Release the bed
+    
+    # Simulate ED assessment process
 
     def ed_assessment(self, patient):
 
         """Simulate ED assessment."""
-        
+
         with self.ed_doctor.request() as req:
             yield req  # Wait until a doctor is available
 
@@ -493,7 +828,7 @@ class Model:
         # Delegate to SDEC referral logic with medical assessment as fallback
         self.env.process(self.refer_to_sdec(patient, self.refer_to_medicine))
 
-    # Simulate referral to medicine
+    # Simulate referral to medicine process
 
     def refer_to_medicine(self, patient):
         
@@ -552,15 +887,15 @@ class Model:
         patient.amu_admission_time = self.env.now
         print(f"Patient {patient.id} admitted to AMU at {patient.amu_admission_time}")
 
+        # Assign transferred_to_amu so ED Majors bed is released
+        patient.transferred_to_amu = True  #
+
         # Record admission time
         self.record_result(patient.id, "Time Admitted to AMU", patient.amu_admission_time)
        
         # Update the DataFrame with admission time
         self.amu_queue_df.loc[self.amu_queue_df['Patient ID'] == patient.id, 'Time Admitted to AMU'] = patient.amu_admission_time
         self.record_result(patient.id, "Time Admitted to AMU", patient.amu_admission_time)
-
-        # Patient exits the system after being admitted
-        print(f"Patient {patient.id} exits the system after AMU admission")
         return
     
         # Exit the process for the patient
@@ -611,6 +946,11 @@ class Model:
             self.record_result(patient.id, "Discharge Decision Point", "after_initial_medical_assessment")
             print(f"Patient {patient.id} discharged at {patient.discharge_time} after initial medical assessment")
             
+            # If the patient was in a UTC bed, release it now
+            if hasattr(patient, "utc_room_req") and patient.utc_room_req is not None:
+                self.utc_rooms.release(patient.utc_room_req)
+                print(f"UTC bed released for Patient {patient.id} at {self.env.now}.")
+
             # Remove the patient from the AMU queue if they are still in it
             try:
                 if patient in self.amu_beds.items:
@@ -681,6 +1021,11 @@ class Model:
             self.record_result(patient.id, "Discharge Decision Point", "after_consultant_assessment")
             print(f"Patient {patient.id} discharged at {patient.discharge_time} after consultant assessment")
         
+            # If the patient was in a UTC bed, release it now
+            if hasattr(patient, "utc_room_req") and patient.utc_room_req is not None:
+                self.utc_rooms.release(patient.utc_room_req)
+                print(f"UTC bed released for Patient {patient.id} at {self.env.now}.")
+
             # Remove the patient from the AMU queue if they are still in it
             try:
                 if patient in self.amu_beds.items:
@@ -747,8 +1092,13 @@ class Model:
 
         """Run the simulation."""
         
-        # Start the patient arrival process
-        self.env.process(self.generate_patient_arrivals())
+        # Start the patient arrival processes
+
+        # Ambulance
+        self.env.process(self.generate_ambulance_arrivals())
+
+        # Walk ins
+        self.env.process(self.generate_walk_in_arrivals())
 
         # Start monitoring the triage nurse queue
         self.env.process(self.monitor_triage_queue_length())
