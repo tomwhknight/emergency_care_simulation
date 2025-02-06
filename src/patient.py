@@ -22,9 +22,12 @@ class Patient:
         self.triage_location = None # Initialize triage space request (None until assigned)
         self.triage_bay_request = None
 
+        self.referral_to_medicine_time = 0.0
+
         # Track outcome
         self.discharged = False
         self.transferred_to_amu = False
+        self.transferred_to_majors = False
         
         # Record disporition 
         self.disposition = None  # Will be 'admit' or 'discharge

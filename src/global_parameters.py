@@ -4,12 +4,12 @@ import os
 class GlobalParameters:
     """Contains constants and parameters used across the simulation (e.g., arrival rates, service times)."""
     def __init__(self, 
+                 ambulance_proportion,
+                 walk_in_proportion,
                  ambulance_acuity_probabilities, 
                  walk_in_acuity_probabilities,
-                 ambulance_peak_mean_patient_arrival_time, 
-                 ambulance_off_peak_mean_patient_arrival_time,
-                 walk_in_peak_mean_patient_arrival_time,
-                 walk_in_off_peak_mean_patient_arrival_time, 
+                 ed_peak_mean_patient_arrival_time,
+                 ed_off_peak_mean_patient_arrival_time, 
                  ambulance_triage_nurse_capacity,
                  walk_in_triage_nurse_capacity,  
                  ed_doctor_capacity, 
@@ -54,17 +54,18 @@ class GlobalParameters:
         self.ed_staffing_file = os.path.join(self.project_dir, "data/staffing_resource/ed_staffing.csv")
         self.medicine_staffing_file = os.path.join(self.project_dir, "data/staffing_resource/medicine_staffing.csv")
         
+        # Mode of arrival
+        self.ambulance_proportion = ambulance_proportion
+        self.walk_in_proportion = walk_in_proportion
+   
         # Patient characterietics
         self.ambulance_acuity_probabilities = ambulance_acuity_probabilities
         self.walk_in_acuity_probabilities = walk_in_acuity_probabilities
 
         # Define inter-arrival time
-        self.ambulance_peak_mean_patient_arrival_time = ambulance_peak_mean_patient_arrival_time 
-        self.ambulance_off_peak_mean_patient_arrival_time = ambulance_off_peak_mean_patient_arrival_time
-
-        self.walk_in_peak_mean_patient_arrival_time = walk_in_peak_mean_patient_arrival_time
-        self.walk_in_off_peak_mean_patient_arrival_time = walk_in_off_peak_mean_patient_arrival_time
-
+        self.ed_peak_mean_patient_arrival_time = ed_peak_mean_patient_arrival_time
+        self.ed_off_peak_mean_patient_arrival_time = ed_off_peak_mean_patient_arrival_time
+        
         # Define the resources
 
         self.ambulance_triage_nurse_capacity = ambulance_triage_nurse_capacity

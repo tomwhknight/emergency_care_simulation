@@ -6,13 +6,13 @@ from src.trial import Trial
 if __name__ == "__main__":
     global_params = GlobalParameters(
 
+        ambulance_proportion = 20,
+        walk_in_proportion = 80,
+
         # Arrival rates
 
-        ambulance_peak_mean_patient_arrival_time = 9.2, 
-        ambulance_off_peak_mean_patient_arrival_time= 12.2,
-
-        walk_in_peak_mean_patient_arrival_time = 4.2,
-        walk_in_off_peak_mean_patient_arrival_time = 9.4,
+        ed_peak_mean_patient_arrival_time = 3.2,
+        ed_off_peak_mean_patient_arrival_time = 6.4,
         
         # Patient characterstics 
         
@@ -20,16 +20,16 @@ if __name__ == "__main__":
         "1": 0.02,    
         "2": 0.40,  
         "3": 0.50,     
-        "4": 0.06,
-        "5": 0.02,
+        "4": 0.05,
+        "5": 0.01,
         },  
 
         walk_in_acuity_probabilities = {
-        "1": 0.01,    
-        "2": 0.18,  
+        "1": 0.05,    
+        "2": 0.20,  
         "3": 0.40,     
         "4": 0.30,
-        "5": 0.01,
+        "5": 0.05,
         },  
 
         # Staffing resource
@@ -42,7 +42,7 @@ if __name__ == "__main__":
 
         # Bed resource
 
-        num_ambulance_triage_bays = 4,
+        num_ambulance_triage_bays = 5,
         num_triage_rooms = 2, 
         num_corridor_spaces = 15,
         num_utc_rooms = 12, 
@@ -87,5 +87,5 @@ if __name__ == "__main__":
         burn_in_time = 0) # burn in to prevent initiation bias
         
     trial = Trial(global_params)
-    total_runs = 1
+    total_runs = 2
     trial.run(total_runs)
