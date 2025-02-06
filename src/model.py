@@ -903,8 +903,10 @@ class Model:
     # Simulate initial medical assessment process
 
     def initial_medical_assessment(self, patient):
+        """Simulate initial medical assessment and decide discharge or admission."""
         start_medical_queue_time = self.env.now
-        print(f"{start_medical_queue_time:.2f}: Patient {patient.id} added to the medical queue.")
+        print(f"{start_medical_queue_time:.2f}: Patient {patient.id} added to the medical take queue.")
+        
         with self.medical_doctor.request() as req:
             yield req  # Wait until medical staff is available
             
@@ -938,18 +940,18 @@ class Model:
             patient.total_time_medical = total_time_medical
             self.record_result(patient.id, "Arrival to Medical Assessment",  total_time_medical)
             
-    # Discharge decision with a low probability (e.g., 5%)
-        if random.random() < self.global_params.medicine_discharge_rate:
-            patient.discharged = True
-            patient.discharge_time = self.env.now
-            self.record_result(patient.id, "Discharge Time", patient.discharge_time)
-            self.record_result(patient.id, "Discharge Decision Point", "after_initial_medical_assessment")
-            print(f"Patient {patient.id} discharged at {patient.discharge_time} after initial medical assessment")
+            # Discharge decision with a low probability (e.g., 5%)
+            if random.random() < self.global_params.medicine_discharge_rate:
+                patient.discharged = True
+                patient.discharge_time = self.env.now
+                self.record_result(patient.id, "Discharge Time", patient.discharge_time)
+                self.record_result(patient.id, "Discharge Decision Point", "after_initial_medical_assessment")
+                print(f"Patient {patient.id} discharged at {patient.discharge_time} after initial medical assessment")
             
-            # If the patient was in a UTC bed, release it now
-            if hasattr(patient, "utc_room_req") and patient.utc_room_req is not None:
-                self.utc_rooms.release(patient.utc_room_req)
-                print(f"UTC bed released for Patient {patient.id} at {self.env.now}.")
+                # If the patient was in a UTC bed, release it now
+                if hasattr(patient, "utc_room_req") and patient.utc_room_req is not None:
+                    self.utc_rooms.release(patient.utc_room_req)
+                    print(f"UTC bed released for Patient {patient.id} at {self.env.now}.")
 
             # Remove the patient from the AMU queue if they are still in it
             try:
@@ -959,11 +961,11 @@ class Model:
             except ValueError:
                 pass  # Patient was not in the queue, nothing to remove
 
-            return  # End process here if discharged
+            if patient.discharged:    
+                return  # End process here if discharged
 
-    # If not discharged, proceed to consultant assessment
-        patient.discharged = False
-        self.env.process(self.consultant_assessment(patient))
+            # If not discharged, proceed to consultant assessment
+            self.env.process(self.consultant_assessment(patient))
         
     # Simulate consultant assessment process
 

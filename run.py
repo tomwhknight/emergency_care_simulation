@@ -8,11 +8,11 @@ if __name__ == "__main__":
 
         # Arrival rates
 
-        ambulance_peak_mean_patient_arrival_time = 6.2, 
-        ambulance_off_peak_mean_patient_arrival_time= 9.2,
+        ambulance_peak_mean_patient_arrival_time = 9.2, 
+        ambulance_off_peak_mean_patient_arrival_time= 12.2,
 
-        walk_in_peak_mean_patient_arrival_time = 3.2,
-        walk_in_off_peak_mean_patient_arrival_time = 6.4,
+        walk_in_peak_mean_patient_arrival_time = 4.2,
+        walk_in_off_peak_mean_patient_arrival_time = 9.4,
         
         # Patient characterstics 
         
@@ -76,14 +76,14 @@ if __name__ == "__main__":
         mean_sdec_assessment_time = 480,
         stdev_sdec_assessment_time = 60,
 
-        ed_discharge_rate = 0.05,
+        ed_discharge_rate = 0.70,
         medicine_discharge_rate = 0.10,
         utc_discharge_prob = 0.9, 
 
         mean_amu_bed_release_interval = 30,
         mean_sdec_capacity_release_interval = 30,
         
-        simulation_time= 440,
+        simulation_time= 1440,
         burn_in_time = 0) # burn in to prevent initiation bias
         
     trial = Trial(global_params)
