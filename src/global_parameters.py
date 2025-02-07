@@ -29,8 +29,10 @@ class GlobalParameters:
                  max_amu_available_beds,
                  mean_triage_assessment_time, 
                  stdev_triage_assessment_time,
-                 mean_ed_assessment_time, 
-                 stdev_ed_assessment_time,
+                 mean_ed_utc_assessment_time, 
+                 stdev_ed_utc_assessment_time,
+                 mean_ed_majors_assessment_time,
+                 stdev_ed_majors_assessment_time, 
                  mean_referral_time,
                  stdev_referral_time,
                  mean_initial_medical_assessment_time, 
@@ -38,9 +40,9 @@ class GlobalParameters:
                  stdev_consultant_assessment_time, 
                  mean_sdec_assessment_time,
                  stdev_sdec_assessment_time,
-                 ed_discharge_rate,
+                 ed_discharge_prob,
                  utc_discharge_prob, 
-                 medicine_discharge_rate,
+                 medicine_discharge_prob,
                  mean_amu_bed_release_interval,    
                  burn_in_time,
                  simulation_time):
@@ -62,6 +64,12 @@ class GlobalParameters:
         self.ambulance_acuity_probabilities = ambulance_acuity_probabilities
         self.walk_in_acuity_probabilities = walk_in_acuity_probabilities
 
+        # Discharge probabilities
+
+        self.ed_discharge_prob = ed_discharge_prob
+        self.utc_discharge_prob = utc_discharge_prob
+        self.medicine_discharge_prob = medicine_discharge_prob
+
         # Define inter-arrival time
         self.ed_peak_mean_patient_arrival_time = ed_peak_mean_patient_arrival_time
         self.ed_off_peak_mean_patient_arrival_time = ed_off_peak_mean_patient_arrival_time
@@ -81,8 +89,6 @@ class GlobalParameters:
         self.num_utc_rooms = num_utc_rooms
         self.num_ed_majors_beds = num_ed_majors_beds 
 
-        self.utc_discharge_prob = utc_discharge_prob
-
         # Define store values 
         self.max_amu_available_beds = max_amu_available_beds # refers max available to transfer at any point (not total AMU capacity)
         self.max_sdec_capacity = max_sdec_capacity # refers max available to transfer at any point (not total SDEC capacity)
@@ -98,8 +104,11 @@ class GlobalParameters:
         self.mean_triage_assessment_time = mean_triage_assessment_time 
         self.stdev_triage_assessment_time = stdev_triage_assessment_time
 
-        self.mean_ed_assessment_time = mean_ed_assessment_time
-        self.stdev_ed_assessment_time = stdev_ed_assessment_time
+        self.mean_ed_utc_assessment_time = mean_ed_utc_assessment_time
+        self.stdev_ed_utc_assessment_time = stdev_ed_utc_assessment_time
+
+        self.mean_ed_majors_assessment_time = mean_ed_majors_assessment_time 
+        self.stdev_ed_majors_assessment_time = stdev_ed_majors_assessment_time
 
         self.mean_referral_time = mean_referral_time
         self.stdev_referral_time = stdev_referral_time
@@ -115,8 +124,6 @@ class GlobalParameters:
 
         # AMU bed release 
         self.mean_amu_bed_release_interval = mean_amu_bed_release_interval
-        self.ed_discharge_rate = ed_discharge_rate
-        self.medicine_discharge_rate = medicine_discharge_rate
 
         # sim duration
         self.burn_in_time = burn_in_time

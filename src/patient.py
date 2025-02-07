@@ -9,20 +9,22 @@ class Patient:
         
         # Patient characteristics 
         self.mode_arrival = mode_arrival
-        self.acuity = acuity # Used to determine eligbility to SDEC
+        self.acuity = int(acuity) # Used to determine eligbility to SDEC
         self.priority = priority # Used to block consultant activity
        
         # Triage attributes 
         self.wait_time_for_triage_space = 0.0  # Initialize wait time as 0
         self.wait_time_for_triage_nurse = 0.0
+        self.triage_location = None 
 
         self.time_at_end_of_triage = 0.0  # Initialize end of triage time as 0
         self.triage_assessment_time = 0.0  # Initialize triage assessment time
+        
         self.sdec_assessment_time = 0.0
-        self.triage_location = None # Initialize triage space request (None until assigned)
-        self.triage_bay_request = None
+        self.triage_outcome = None
 
         self.referral_to_medicine_time = 0.0
+        self.ed_assessment_time = 0.0,
 
         # Track outcome
         self.discharged = False
