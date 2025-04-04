@@ -9,6 +9,9 @@ if __name__ == "__main__":
         ambulance_proportion = 20,
         walk_in_proportion = 80,
 
+        # Source of referral
+        proportion_direct_primary_care = 0.07,  
+
         # Arrival rates
 
         ed_peak_mean_patient_arrival_time = 3.0,
@@ -33,21 +36,13 @@ if __name__ == "__main__":
         },  
 
         # Staffing resource
-
         ambulance_triage_nurse_capacity = 1,
         walk_in_triage_nurse_capacity = 2,
         ed_doctor_capacity = 34,
         medical_doctor_capacity = 5,
         consultant_capacity = 1, 
 
-        # Bed resource
-
-        num_ambulance_triage_bays = 5,
-        num_triage_rooms = 2, 
-        num_corridor_spaces = 15,
-        num_utc_rooms = 12, 
-        num_ed_majors_beds = 24, 
-
+    
         # SDEC capacity
 
         sdec_open_hour = 8, 
@@ -62,14 +57,18 @@ if __name__ == "__main__":
         mean_triage_assessment_time = 12.0,
         stdev_triage_assessment_time = 7,
         
-        mean_ed_utc_assessment_time= 30,
-        stdev_ed_utc_assessment_time = 10, 
+        mu_ed_assessment_time = 3.3,
+        sigma_ed_assessment_time = 0.35,
 
-        mean_ed_majors_assessment_time= 60,
-        stdev_ed_majors_assessment_time = 20,
-        
-        mean_referral_time = 60,
-        stdev_referral_time = 20,
+        mu_ed_delay_time_discharge = 4.5,
+        sigma_ed_delay_time_discharge = 1.0,
+
+        mu_ed_delay_time_admission = 4.6,
+        sigma_ed_delay_time_admission = 1.2,
+
+        ed_discharge_prob = 0.75,
+        ed_medicine_referral_prob = 0.15,
+        ed_other_specialty_prob = 0.10,
 
         mean_initial_medical_assessment_time = 60,
         
@@ -79,9 +78,9 @@ if __name__ == "__main__":
         mean_sdec_assessment_time = 480,
         stdev_sdec_assessment_time = 60,
 
-        ed_discharge_prob = 0.70,
+       
         medicine_discharge_prob = 0.10,
-        utc_discharge_prob = 0.90, 
+    
 
         mean_amu_bed_release_interval = 30,
         mean_sdec_capacity_release_interval = 30,

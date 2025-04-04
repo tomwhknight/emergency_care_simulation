@@ -6,6 +6,7 @@ class GlobalParameters:
     def __init__(self, 
                  ambulance_proportion,
                  walk_in_proportion,
+                 proportion_direct_primary_care,
                  ambulance_acuity_probabilities, 
                  walk_in_acuity_probabilities,
                  ed_peak_mean_patient_arrival_time,
@@ -15,11 +16,6 @@ class GlobalParameters:
                  ed_doctor_capacity, 
                  medical_doctor_capacity, 
                  consultant_capacity, 
-                 num_ambulance_triage_bays,
-                 num_triage_rooms, 
-                 num_corridor_spaces,
-                 num_utc_rooms, 
-                 num_ed_majors_beds,
                  mean_sdec_capacity_release_interval, 
                  sdec_open_hour, 
                  sdec_close_hour,
@@ -29,19 +25,25 @@ class GlobalParameters:
                  max_amu_available_beds,
                  mean_triage_assessment_time, 
                  stdev_triage_assessment_time,
-                 mean_ed_utc_assessment_time, 
-                 stdev_ed_utc_assessment_time,
-                 mean_ed_majors_assessment_time,
-                 stdev_ed_majors_assessment_time, 
-                 mean_referral_time,
-                 stdev_referral_time,
+                 
+                 mu_ed_assessment_time,
+                 sigma_ed_assessment_time, 
+
+                 mu_ed_delay_time_discharge,
+                 sigma_ed_delay_time_discharge,
+
+                 mu_ed_delay_time_admission, 
+                 sigma_ed_delay_time_admission, 
+
+                 ed_discharge_prob,
+                 ed_medicine_referral_prob,
+                 ed_other_specialty_prob,
+          
                  mean_initial_medical_assessment_time, 
                  mean_consultant_assessment_time,
                  stdev_consultant_assessment_time, 
                  mean_sdec_assessment_time,
                  stdev_sdec_assessment_time,
-                 ed_discharge_prob,
-                 utc_discharge_prob, 
                  medicine_discharge_prob,
                  mean_amu_bed_release_interval,    
                  burn_in_time,
@@ -63,11 +65,18 @@ class GlobalParameters:
         # Patient characterietics
         self.ambulance_acuity_probabilities = ambulance_acuity_probabilities
         self.walk_in_acuity_probabilities = walk_in_acuity_probabilities
+        
+        # Source of referral 
+        self.proportion_direct_primary_care = proportion_direct_primary_care
 
-        # Discharge probabilities
+        # ED disposition probabilities
 
         self.ed_discharge_prob = ed_discharge_prob
-        self.utc_discharge_prob = utc_discharge_prob
+        self.ed_medicine_referral_prob = ed_medicine_referral_prob
+        self.ed_other_specialty_prob = ed_other_specialty_prob
+
+        # Medicine discharge probabilities
+
         self.medicine_discharge_prob = medicine_discharge_prob
 
         # Define inter-arrival time
@@ -81,13 +90,6 @@ class GlobalParameters:
         self.ed_doctor_capacity = ed_doctor_capacity
         self.medical_doctor_capacity = medical_doctor_capacity
         self.consultant_capacity = consultant_capacity
-
-        # Triage capacity settings
-        self.num_ambulance_triage_bays = num_ambulance_triage_bays   # Number of bays for triage
-        self.num_corridor_spaces = num_corridor_spaces # Max patients in the corridor
-        self.num_triage_rooms = num_triage_rooms
-        self.num_utc_rooms = num_utc_rooms
-        self.num_ed_majors_beds = num_ed_majors_beds 
 
         # Define store values 
         self.max_amu_available_beds = max_amu_available_beds # refers max available to transfer at any point (not total AMU capacity)
@@ -104,14 +106,14 @@ class GlobalParameters:
         self.mean_triage_assessment_time = mean_triage_assessment_time 
         self.stdev_triage_assessment_time = stdev_triage_assessment_time
 
-        self.mean_ed_utc_assessment_time = mean_ed_utc_assessment_time
-        self.stdev_ed_utc_assessment_time = stdev_ed_utc_assessment_time
+        self.mu_ed_assessment_time = mu_ed_assessment_time 
+        self.sigma_ed_assessment_time = sigma_ed_assessment_time
 
-        self.mean_ed_majors_assessment_time = mean_ed_majors_assessment_time 
-        self.stdev_ed_majors_assessment_time = stdev_ed_majors_assessment_time
+        self.mu_ed_delay_time_discharge = mu_ed_delay_time_discharge
+        self.sigma_ed_delay_time_discharge = sigma_ed_delay_time_discharge
 
-        self.mean_referral_time = mean_referral_time
-        self.stdev_referral_time = stdev_referral_time
+        self.mu_ed_delay_time_admission = mu_ed_delay_time_admission
+        self.sigma_ed_delay_time_admission = sigma_ed_delay_time_admission
 
         self.mean_initial_medical_assessment_time = mean_initial_medical_assessment_time
         self.mean_consultant_assessment_time = mean_consultant_assessment_time
@@ -125,6 +127,6 @@ class GlobalParameters:
         # AMU bed release 
         self.mean_amu_bed_release_interval = mean_amu_bed_release_interval
 
-        # sim duration
+        # Sim duration
         self.burn_in_time = burn_in_time
         self.simulation_time = simulation_time

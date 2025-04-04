@@ -23,13 +23,6 @@ class Model:
         # Instantiate the Lognormal distribution for triage assessment time
         self.triage_time_distribution = Lognormal(mean=self.global_params.mean_triage_assessment_time,
                                                   stdev=self.global_params.stdev_triage_assessment_time)
-        
-        
-        self.ed_assessment_time_distribution = Lognormal(mean=self.global_params.mean_ed_assessment_time, 
-                                                   stdev=self.global_params.stdev_ed_assessment_time)
-
-        self.referral_time_distribution = Lognormal(mean=self.global_params.mean_referral_time, 
-                                                   stdev=self.global_params.stdev_referral_time)
 
         self.consultant_time_distribution = Lognormal(mean=self.global_params.mean_consultant_assessment_time, 
                                                    stdev=self.global_params.stdev_consultant_assessment_time)
@@ -66,7 +59,7 @@ class Model:
 
             # --- ED assessment ---
 
-            "Wait for ED Doctor",
+            "Wait ED Assessment Time",
             "Queue Length ED doctor",
             "ED Assessment Start Time",
             "ED Assessment Time",
@@ -120,10 +113,7 @@ class Model:
         # Create simpy resources for staffing levels
         self.ambulance_triage_nurse = simpy.Resource(self.env, capacity=self.global_params.ambulance_triage_nurse_capacity)
         self.walk_in_triage_nurse = simpy.Resource(self.env, capacity = self.global_params.walk_in_triage_nurse_capacity)
-        self.ambulance_triage_bay = simpy.Resource(self.env, capacity=self.global_params.num_ambulance_triage_bays)
-        self.triage_room = simpy.Resource(self.env, capacity = self.global_params.num_triage_rooms)
-        self.triage_corridor = simpy.Resource(self.env, capacity=self.global_params.num_corridor_spaces)
-        
+
         # Create simpy resources for ED clinical assessment
         self.ed_doctor = simpy.PriorityResource(self.env, capacity=self.global_params.ed_doctor_capacity)
         self.medical_doctor = simpy.PriorityResource(self.env, capacity=self.global_params.medical_doctor_capacity)
@@ -224,7 +214,7 @@ class Model:
 
             # --- ED Assessment Metrics ---
             "Queue Length ED doctor": 0.0,
-            "Wait for ED Doctor": 0.0,
+            "Wait ED Assessment Time": 0.0,
             "ED Assessment Start Time": 0.0,
             "ED Assessment Service Time": 0.0,
             "Completed ED Assessment": 0.0,
@@ -292,7 +282,7 @@ class Model:
                 print(f"Ambulance Patient {patient.id} arrives at {arrival_time}")
                 self.env.process(self.ambulance_triage(patient))  # Send to ambulance triage
             else:
-                print(f"🚶 Walk-in Patient {patient.id} arrives at {arrival_time}")
+                print(f"Walk-in Patient {patient.id} arrives at {arrival_time}")
                 self.env.process(self.walk_in_triage(patient))  # Send to walk-in triage
 
             # Convert mean inter-arrival time to a rate
@@ -320,7 +310,6 @@ class Model:
     
     # Method to generate SDEC capacity
     def generate_sdec_capacity(self):
-        while True:
         # Determine if it's a weekend
             current_day = calculate_day_of_week(self.env.now)  # e.g., "Monday", "Saturday"
             is_weekend = current_day in ["Saturday", "Sunday"]
@@ -574,8 +563,7 @@ class Model:
     # Simulate triage process
     def walk_in_triage(self, patient):
         """Simulate triage assessment for walk ins"""
-        print(f"Walk in triage nurse capacity: {self.walk_in_triage_nurse}")
-        print(f"Queue before request: {len(self.walk_in_triage_nurse.queue)} patients at time {self.env.now}")
+        print(f"Walk in triage queue before request: {len(self.walk_in_triage_nurse.queue)} patients at time {self.env.now}")
         with self.walk_in_triage_nurse.request() as req:
             yield req # Wait until a triage nurse is available
              # Record the queue length
@@ -587,21 +575,21 @@ class Model:
             print(f"Patient {patient.id} starts triage assessment at {triage_nurse_assessment_start_time}")
 
             # Sample from the triage nurse assessment distribution 
-            triage_nurse_assessment_time = self.triage_time_distribution
+            triage_nurse_assessment_time = self.triage_time_distribution.sample()
             yield self.env.timeout(triage_nurse_assessment_time)
 
              # Record triage assessment time in the results # 
-            self.record_result(patient.id, "Triage Assessment Service Time", triage_nurse_assessment_time)
+            self.record_result(patient.id, "Triage Nurse Assessment Service Time", triage_nurse_assessment_time)
             patient.triage_nurse_assessment_time = triage_nurse_assessment_time 
 
          # After triage, proceed to SDEC referral process (with ED assessment as fallback)
-        yield self.env.process(self.refer_to_sdec(patient, fallback=self.ed_assessment))
+        yield self.env.process(self.refer_to_sdec(patient, fallback_process = self.ed_assessment))
 
 
     def ambulance_triage(self, patient):
         """Simulate triage assessment for Ambulance"""
-        print(f"Ambulance triage nurse capacity: {self.ambulance_triage_nurse_triage_nurse}")
-        print(f"Queue before request: {len(self.ambulance_triage_nurse.queue)} patients at time {self.env.now}")
+        print(f"Ambulance triage nurse capacity: {self.ambulance_triage_nurse}")
+        print(f"Ambulance Queue before request: {len(self.ambulance_triage_nurse.queue)} patients at time {self.env.now}")
         
         with self.ambulance_triage_nurse.request() as req:
             yield req # Wait until a triage nurse is available
@@ -614,11 +602,11 @@ class Model:
             print(f"Patient {patient.id} starts triage assessment at {triage_nurse_assessment_start_time}")
 
             # Sample from the triage nurse assessment distribution 
-            triage_nurse_assessment_time = self.triage_time_distribution
+            triage_nurse_assessment_time = self.triage_time_distribution.sample()
             yield self.env.timeout(triage_nurse_assessment_time)
 
              # Record triage assessment time in the results # 
-            self.record_result(patient.id, "Triage Assessment Service Time", triage_nurse_assessment_time)
+            self.record_result(patient.id, "Triage Nurse Assessment Service Time", triage_nurse_assessment_time)
             patient.triage_nurse_assessment_time = triage_nurse_assessment_time 
 
          # After triage, proceed ED assessment
@@ -629,13 +617,16 @@ class Model:
 
     def ed_assessment(self, patient):
         """Simulate ED assessment."""
-        print(f"ED Doctor Capacity: {self.ed_doctor.capacity}")
-        print(f"Queue before request: {len(self.ed_doctor.queue)} patients at time {self.env.now}")
+        print(f"ED Doctor Queue at time of request: {len(self.ed_doctor.queue)} patients at time {self.env.now}")
+        self.record_result(patient.id, "Queue Length ED doctor", len(self.ed_doctor.queue))
+        
+        ed_doctor_request_time = self.env.now
         with self.ed_doctor.request() as req:
             yield req  # Wait until a doctor is available
-            print(f"Queue after request: {len(self.ed_doctor.queue)} patients at time {self.env.now}")
-            # Record the queue length
-            self.record_result(patient.id, "Queue Length ED doctor", len(self.ed_doctor.queue))
+            ed_assessment_start_time = self.env.now
+            ed_doctor_wait_time = ed_assessment_start_time - ed_doctor_request_time 
+            self.record_result(patient.id, "Wait ED Assessment Time", ed_doctor_wait_time)
+            
 
             # Record the start time of ED assessment
             ed_assessment_start_time = self.env.now
@@ -967,9 +958,6 @@ class Model:
 
         # Generate arrivals 
         self.env.process(self.generate_arrivals())
-
-        # Start monitoring the triage nurse queue
-        self.env.process(self.monitor_triage_queue_length())
    
         # Start monitoring the triage nurse queue
         self.env.process(self.monitor_consultant_queue_length())
