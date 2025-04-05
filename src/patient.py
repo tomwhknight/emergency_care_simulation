@@ -1,6 +1,6 @@
 class Patient:
     """Class representing a patient in the system."""
-    def __init__(self, patient_id, arrival_time, day_of_arrival, arrival_clock_time, current_hour, source_of_referral, mode_arrival, priority = 1):
+    def __init__(self, patient_id, arrival_time, day_of_arrival, arrival_clock_time, current_hour, source_of_referral, mode_arrival, acuity, priority = 1):
         self.id = patient_id
         self.arrival_time = arrival_time
         self.arrival_clock_time = arrival_clock_time
@@ -11,6 +11,7 @@ class Patient:
         self.priority = priority # Used to block consultant activity
         self.mode_arrival = mode_arrival
         self.source_of_referral = source_of_referral
+        self.acuity = acuity 
 
        
         # Triage attributes 

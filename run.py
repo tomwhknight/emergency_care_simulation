@@ -54,11 +54,11 @@ if __name__ == "__main__":
         max_amu_available_beds = 10,
         max_sdec_capacity = 30,
 
-        mean_triage_assessment_time = 12.0,
-        stdev_triage_assessment_time = 7,
+        mean_triage_assessment_time = 7,
+        stdev_triage_assessment_time = 2,
         
-        mu_ed_assessment_time = 3.3,
-        sigma_ed_assessment_time = 0.35,
+        mean_ed_assessment_time = 30.0,
+        stdev_ed_assessment_time = 15,
 
         mu_ed_delay_time_discharge = 4.5,
         sigma_ed_delay_time_discharge = 1.0,
@@ -71,7 +71,8 @@ if __name__ == "__main__":
         ed_other_specialty_prob = 0.10,
 
         mean_initial_medical_assessment_time = 60,
-        
+        stdev_initial_medical_assessment_time = 20, 
+
         mean_consultant_assessment_time = 25,
         stdev_consultant_assessment_time = 10, 
 
@@ -81,11 +82,10 @@ if __name__ == "__main__":
        
         medicine_discharge_prob = 0.10,
     
-
         mean_amu_bed_release_interval = 30,
         mean_sdec_capacity_release_interval = 30,
         
-        simulation_time= 440,
+        simulation_time= 1440,
         burn_in_time = 0) # burn in to prevent initiation bias
         
     trial = Trial(global_params)

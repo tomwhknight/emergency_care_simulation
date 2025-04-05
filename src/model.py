@@ -3,7 +3,7 @@ import random
 import pandas as pd
 import numpy as np
 from src.patient import Patient
-from src.helper import calculate_hour_of_day, calculate_day_of_week, extract_hour
+from src.helper import calculate_hour_of_day, extract_day_of_week, extract_hour
 from src.helper import Lognormal
 
 class Model:
@@ -19,10 +19,18 @@ class Model:
         # Load CSV data
         self.ed_staffing_data = pd.read_csv(self.global_params.ed_staffing_file)
         self.medical_staffing_data = pd.read_csv(self.global_params.medicine_staffing_file)
+        self.amu_bed_rate_data = pd.read_csv(self.global_params.amu_bed_rate_file)
 
         # Instantiate the Lognormal distribution for triage assessment time
         self.triage_time_distribution = Lognormal(mean=self.global_params.mean_triage_assessment_time,
                                                   stdev=self.global_params.stdev_triage_assessment_time)
+
+        self.ed_assessment_time_distribution = Lognormal(mean=self.global_params.mean_ed_assessment_time,
+                                                  stdev=self.global_params.stdev_ed_assessment_time)
+        
+        self.medical_assessment_time_distribution = Lognormal(mean=self.global_params.mean_initial_medical_assessment_time,
+                                                  stdev=self.global_params.stdev_initial_medical_assessment_time)
+        
 
         self.consultant_time_distribution = Lognormal(mean=self.global_params.mean_consultant_assessment_time, 
                                                    stdev=self.global_params.stdev_consultant_assessment_time)
@@ -146,7 +154,7 @@ class Model:
         
             # Add time variables
             arrival_clock_time = calculate_hour_of_day(arrival_time)
-            day_of_arrival = calculate_day_of_week(arrival_time)
+            day_of_arrival = extract_day_of_week(arrival_time)
             current_hour = extract_hour(arrival_time)
 
             
@@ -185,7 +193,8 @@ class Model:
             arrival_clock_time,
             current_hour,
             source_of_referral,
-            mode_of_arrival)
+            mode_of_arrival, 
+            acuity)
 
             # Initialise a dictionary of patient results 
             patient_results = {
@@ -197,6 +206,7 @@ class Model:
             "Hour of Arrival": current_hour,
             "Mode of Arrival": mode_of_arrival,
             "Source of Referral": source_of_referral,
+            "Acuity": acuity,
             
 
             # --- Triage-Related Metrics ---
@@ -297,8 +307,18 @@ class Model:
 
         """Periodically release beds based on a Poisson distribution."""
         while True:
+
+        # Extract the current hour
+            current_hour = extract_hour(self.env.now)
+            current_day = extract_day_of_week(self.env.now)
+
+            # Get the mean for day and hour
+            mean_amu_bed_rate = self.amu_bed_rate_data.loc[
+            (self.amu_bed_rate_data['hour'] == current_hour) & (self.amu_bed_rate_data ['day'] == current_day), 'mean_beds_available_per_min'
+            ].values[0]
+
             # Sample time until next bed release using an exponential distribution
-            amu_bed_release_interval = random.expovariate(1.0 / self.global_params.mean_amu_bed_release_interval)
+            amu_bed_release_interval = random.expovariate(mean_amu_bed_rate)
             yield self.env.timeout(amu_bed_release_interval)
 
             # Add a bed if there is space in the store
@@ -311,7 +331,7 @@ class Model:
     # Method to generate SDEC capacity
     def generate_sdec_capacity(self):
         # Determine if it's a weekend
-            current_day = calculate_day_of_week(self.env.now)  # e.g., "Monday", "Saturday"
+            current_day = extract_day_of_week(self.env.now)  # e.g., "Monday", "Saturday"
             is_weekend = current_day in ["Saturday", "Sunday"]
 
              # Fetch the base capacity based on the day type
@@ -332,7 +352,7 @@ class Model:
             print(f"SDEC capacity reset to {sdec_capacity} slots on {current_day} at time {self.env.now:.2f}.")
 
             # Dynamically add slots throughout the day
-            while calculate_day_of_week(self.env.now) == current_day:  # Stay within the same day
+            while extract_day_of_week(self.env.now) == current_day:  # Stay within the same day
                 # Sample time until the next slot release
                 sdec_capacity_release_interval = random.expovariate(1.0 / self.global_params.mean_sdec_capacity_release_interval)
                 yield self.env.timeout(sdec_capacity_release_interval)
@@ -433,7 +453,7 @@ class Model:
             available_doctors = self.ed_staffing_data.loc[
             self.ed_staffing_data['hour'] == current_hour, 'num_staff'
             ].values[0]
-            print("Number of doctors available at hour {current_hour}: {available_doctors}")
+            print(f"Number of doctors available at hour {current_hour}: {available_doctors}")
 
             # Calculate the number of doctors to block
             ed_doctors_to_block = self.ed_doctor.capacity - available_doctors
@@ -563,7 +583,7 @@ class Model:
     # Simulate triage process
     def walk_in_triage(self, patient):
         """Simulate triage assessment for walk ins"""
-        print(f"Walk in triage queue before request: {len(self.walk_in_triage_nurse.queue)} patients at time {self.env.now}")
+        print(f"Walk-in Triage Queue at time of request: {len(self.walk_in_triage_nurse.queue)} patients at time {self.env.now}")
         with self.walk_in_triage_nurse.request() as req:
             yield req # Wait until a triage nurse is available
              # Record the queue length
@@ -588,8 +608,7 @@ class Model:
 
     def ambulance_triage(self, patient):
         """Simulate triage assessment for Ambulance"""
-        print(f"Ambulance triage nurse capacity: {self.ambulance_triage_nurse}")
-        print(f"Ambulance Queue before request: {len(self.ambulance_triage_nurse.queue)} patients at time {self.env.now}")
+        print(f"Ambulance Triage Queue at time of request: {len(self.ambulance_triage_nurse.queue)} patients at time {self.env.now}")
         
         with self.ambulance_triage_nurse.request() as req:
             yield req # Wait until a triage nurse is available
@@ -633,10 +652,8 @@ class Model:
             self.record_result(patient.id, "ED Assessment Start Time", ed_assessment_start_time)
             print(f"Patient {patient.id} starts ED assessment at {ed_assessment_start_time}")
 
-            # Simulate the actual triage assessment time using the lognormal distribution
-            ed_assessment_time = np.random.lognormal(
-                mean= self.global_params.mu_ed_assessment_time, 
-                sigma= self.global_params.sigma_ed_assessment_time)
+            # Sample from the triage nurse assessment distribution 
+            ed_assessment_time = self.ed_assessment_time_distribution.sample()
             yield self.env.timeout(ed_assessment_time)
             
             # Record ed assessment time in the results # 
@@ -658,6 +675,7 @@ class Model:
                 ],
                 k=1
             )[0]
+            print(f"Patient {patient.id} ED outcome: {ed_outcome}")
 
             # Route accordingly
             if ed_outcome == "Discharge":
@@ -671,6 +689,7 @@ class Model:
                 self.record_result(patient.id, "Discharge Decision Point", "ed_discharge")
                 self.record_result(patient.id, "Time in System", time_in_system)
                 patient.ed_disposition = "Discharged ED"
+                print(f"Patient {patient.id} discharged from ED at {patient.discharge_time}")
                 return
 
             elif ed_outcome == "OtherSpecialty":
@@ -685,6 +704,7 @@ class Model:
                 self.record_result(patient.id, "Discharge Decision Point", "ed_referred_other_specialty_pseudo_exit")
                 self.record_result(patient.id, "Discharge Time", pseudo_departure_time)
                 patient.ed_disposition = "Admit - Other Speciality"
+                print(f"Patient {patient.id} Referred - Other Speciality {pseudo_departure_time}")
                 return
 
             elif ed_outcome == "Medicine":
@@ -695,7 +715,8 @@ class Model:
                 yield self.env.timeout(decision_delay_admission)
                 patient.referral_to_medicine_time = self.env.now
                 self.record_result(patient.id, "Simulation Referral Time", patient.referral_to_medicine_time)
-                patient.ed_disposition = "Admit - Medicine"
+                patient.ed_disposition = "Referred - Medicine"
+                print(f"Patient {patient.id} Referred - Medicine {patient.referral_to_medicine_time}")
                     
                     # Record total time from arrival to referral
                     
@@ -703,20 +724,15 @@ class Model:
                 self.record_result(patient.id, "Arrival to Referral", total_time_referral)
                 
                 # Pass on to downstream Medicine pathway
-
-                print(f"Patient {patient.id} referred to medicine at {self.env.now}")
-                self.env.process(self.refer_to_sdec(patient, self.handle_ed_referral))
+                yield self.env.process(self.handle_ed_referral(patient))
             
+
     def handle_ed_referral(self, patient):
         """Handles referral after ED assessment when SDEC is rejected.
         Ensures patient is referred to AMU queue while also starting medical assessment."""
-
-        # Attempt AMU Referral (patients wait in queue)
-        self.env.process(self.refer_to_amu_bed(patient))
-
-        # Start Initial Medical Assessment
-        self.env.process(self.initial_medical_assessment(patient))
-        yield self.env.timeout(0)  
+        
+        self.env.process(self.refer_to_amu_bed(patient))          
+        yield self.env.process(self.initial_medical_assessment(patient))  # Wait for this to finish
 
     # Simulate request for AMU bed
 
@@ -742,7 +758,6 @@ class Model:
         patient.amu_admission_time = self.env.now
         print(f"Patient {patient.id} admitted to AMU at {patient.amu_admission_time}")
 
-        # Assign transferred_to_amu so ED Majors bed is released
         patient.transferred_to_amu = True  #
 
         # Record admission time
@@ -760,8 +775,8 @@ class Model:
     def initial_medical_assessment(self, patient):
         """Simulate initial medical assessment and decide discharge or admission."""
         start_medical_queue_time = self.env.now
-        print(f"{start_medical_queue_time:.2f}: Patient {patient.id} added to the medical take queue.")
-        
+        print(f"Patient {patient.id} added to the medical take queue at {self.env.now}")
+     
         # Queue length of take at the time patient referred 
         queue_length_medical_doctor = len(self.medical_doctor.queue)
         self.record_result(patient.id, "Queue Length Medical Doctor", queue_length_medical_doctor)

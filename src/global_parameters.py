@@ -23,11 +23,15 @@ class GlobalParameters:
                  weekend_sdec_base_capacity, 
                  max_sdec_capacity, 
                  max_amu_available_beds,
+
                  mean_triage_assessment_time, 
                  stdev_triage_assessment_time,
                  
-                 mu_ed_assessment_time,
-                 sigma_ed_assessment_time, 
+                 mean_ed_assessment_time,
+                 stdev_ed_assessment_time, 
+                 
+                 mean_initial_medical_assessment_time,
+                 stdev_initial_medical_assessment_time, 
 
                  mu_ed_delay_time_discharge,
                  sigma_ed_delay_time_discharge,
@@ -39,7 +43,7 @@ class GlobalParameters:
                  ed_medicine_referral_prob,
                  ed_other_specialty_prob,
           
-                 mean_initial_medical_assessment_time, 
+                
                  mean_consultant_assessment_time,
                  stdev_consultant_assessment_time, 
                  mean_sdec_assessment_time,
@@ -48,15 +52,21 @@ class GlobalParameters:
                  mean_amu_bed_release_interval,    
                  burn_in_time,
                  simulation_time):
-        
-        # Define the base project directory
 
          # Determine the project root directory (parent of src)
         self.project_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
         
-        # Define the file path relative to the project directory
+         # Define the file path for generators
+        self.amu_bed_rate_file = os.path.join(self.project_dir, "data/generator_distributions/amu_bed_rate.csv")
+        
+        
+        # Define the file path for staffing resources
         self.ed_staffing_file = os.path.join(self.project_dir, "data/staffing_resource/ed_staffing.csv")
         self.medicine_staffing_file = os.path.join(self.project_dir, "data/staffing_resource/medicine_staffing.csv")
+        
+        
+    
+      
         
         # Mode of arrival
         self.ambulance_proportion = ambulance_proportion
@@ -106,8 +116,8 @@ class GlobalParameters:
         self.mean_triage_assessment_time = mean_triage_assessment_time 
         self.stdev_triage_assessment_time = stdev_triage_assessment_time
 
-        self.mu_ed_assessment_time = mu_ed_assessment_time 
-        self.sigma_ed_assessment_time = sigma_ed_assessment_time
+        self.mean_ed_assessment_time = mean_ed_assessment_time
+        self.stdev_ed_assessment_time = stdev_ed_assessment_time
 
         self.mu_ed_delay_time_discharge = mu_ed_delay_time_discharge
         self.sigma_ed_delay_time_discharge = sigma_ed_delay_time_discharge
@@ -116,7 +126,7 @@ class GlobalParameters:
         self.sigma_ed_delay_time_admission = sigma_ed_delay_time_admission
 
         self.mean_initial_medical_assessment_time = mean_initial_medical_assessment_time
-        self.mean_consultant_assessment_time = mean_consultant_assessment_time
+        self.stdev_initial_medical_assessment_time = stdev_initial_medical_assessment_time
         
         self.mean_consultant_assessment_time = mean_consultant_assessment_time
         self.stdev_consultant_assessment_time = stdev_consultant_assessment_time 
