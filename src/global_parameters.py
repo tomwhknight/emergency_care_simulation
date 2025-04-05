@@ -9,8 +9,6 @@ class GlobalParameters:
                  proportion_direct_primary_care,
                  ambulance_acuity_probabilities, 
                  walk_in_acuity_probabilities,
-                 ed_peak_mean_patient_arrival_time,
-                 ed_off_peak_mean_patient_arrival_time, 
                  ambulance_triage_nurse_capacity,
                  walk_in_triage_nurse_capacity,  
                  ed_doctor_capacity, 
@@ -43,7 +41,6 @@ class GlobalParameters:
                  ed_medicine_referral_prob,
                  ed_other_specialty_prob,
           
-                
                  mean_consultant_assessment_time,
                  stdev_consultant_assessment_time, 
                  mean_sdec_assessment_time,
@@ -57,6 +54,7 @@ class GlobalParameters:
         self.project_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
         
          # Define the file path for generators
+        self.arrival_rate_file = os.path.join(self.project_dir, "data/generator_distributions/arrival_rate.csv")
         self.amu_bed_rate_file = os.path.join(self.project_dir, "data/generator_distributions/amu_bed_rate.csv")
         
         
@@ -88,10 +86,6 @@ class GlobalParameters:
         # Medicine discharge probabilities
 
         self.medicine_discharge_prob = medicine_discharge_prob
-
-        # Define inter-arrival time
-        self.ed_peak_mean_patient_arrival_time = ed_peak_mean_patient_arrival_time
-        self.ed_off_peak_mean_patient_arrival_time = ed_off_peak_mean_patient_arrival_time
         
         # Define the resources
 

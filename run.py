@@ -11,11 +11,6 @@ if __name__ == "__main__":
 
         # Source of referral
         proportion_direct_primary_care = 0.07,  
-
-        # Arrival rates
-
-        ed_peak_mean_patient_arrival_time = 3.0,
-        ed_off_peak_mean_patient_arrival_time = 6.0,
         
         # Patient characterstics 
         

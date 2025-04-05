@@ -34,8 +34,8 @@ class Patient:
         
         # Record disporition 
         self.ed_disposition = None  # Will be 'Admit - Medicine', 'Admit - Other' or 'Discharge'
-        self.discharge = None
-
+        self.discharged = None
+       
         # Binary metrics initialized to 0 (not exceeding thresholds yet)
         self.ed_4hrs_after_arrival = 0
         self.ed_4hrs_after_referral = 0

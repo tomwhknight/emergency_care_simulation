@@ -20,6 +20,7 @@ class Model:
         self.ed_staffing_data = pd.read_csv(self.global_params.ed_staffing_file)
         self.medical_staffing_data = pd.read_csv(self.global_params.medicine_staffing_file)
         self.amu_bed_rate_data = pd.read_csv(self.global_params.amu_bed_rate_file)
+        self.arrival_rate_data = pd.read_csv(self.global_params.arrival_rate_file)
 
         # Instantiate the Lognormal distribution for triage assessment time
         self.triage_time_distribution = Lognormal(mean=self.global_params.mean_triage_assessment_time,
@@ -155,7 +156,8 @@ class Model:
             # Add time variables
             arrival_clock_time = calculate_hour_of_day(arrival_time)
             day_of_arrival = extract_day_of_week(arrival_time)
-            current_hour = extract_hour(arrival_time)
+            current_day = extract_day_of_week(self.env.now)
+            current_hour = extract_hour(self.env.now)
 
             
             mode_of_arrival = random.choices(["Ambulance", "Walk-in"], 
@@ -277,15 +279,6 @@ class Model:
             self.record_result(patient.id, "Day of Arrival", patient.day_of_arrival)
             self.record_result(patient.id, "Clock Hour of Arrival", patient.arrival_clock_time)
             self.record_result(patient.id, "Hour of Arrival", patient.current_hour)
-
-            
-
-            # Determine arrival rate based on the current hour
-            if 9 <= current_hour < 21:  # Peak hours (09:00 to 21:00)
-                mean_interarrival_time = self.global_params.ed_peak_mean_patient_arrival_time
-            else:  # Off-peak hours (21:00 to 09:00)
-                mean_interarrival_time = self.global_params.ed_off_peak_mean_patient_arrival_time
-
             
             # Assign patient to correct triage process
             if mode_of_arrival == "Ambulance":
@@ -295,12 +288,14 @@ class Model:
                 print(f"Walk-in Patient {patient.id} arrives at {arrival_time}")
                 self.env.process(self.walk_in_triage(patient))  # Send to walk-in triage
 
-            # Convert mean inter-arrival time to a rate
-            arrival_rate = 1.0 / mean_interarrival_time
+            # Get the mean arrival rate for day and hour
+            mean_arrival_rate = self.arrival_rate_data.loc[
+            (self.arrival_rate_data['hour'] == current_hour) & (self.arrival_rate_data ['day'] == current_day), 'mean_arrivals_per_min'
+            ].values[0]
 
-            # Sample the inter-arrival time using an exponential distribution
-            walk_in_inter_arrival_time = random.expovariate(arrival_rate)
-            yield self.env.timeout(walk_in_inter_arrival_time)
+            # Sample time until next arrival
+            arrival_interval = random.expovariate(mean_arrival_rate)
+            yield self.env.timeout(arrival_interval)
 
     # Method to generate AMU beds
     def generate_amu_beds(self):
