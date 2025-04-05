@@ -32,7 +32,8 @@ if __name__ == "__main__":
 
         # Staffing resource
         ambulance_triage_nurse_capacity = 1,
-        walk_in_triage_nurse_capacity = 2,
+        walk_in_triage_nurse_capacity = 1,
+
         ed_doctor_capacity = 34,
         medical_doctor_capacity = 5,
         consultant_capacity = 1, 
@@ -49,7 +50,7 @@ if __name__ == "__main__":
         max_amu_available_beds = 10,
         max_sdec_capacity = 30,
 
-        mean_triage_assessment_time = 7,
+        mean_triage_assessment_time = 6,
         stdev_triage_assessment_time = 2,
         
         mean_ed_assessment_time = 30.0,
@@ -65,8 +66,8 @@ if __name__ == "__main__":
         ed_medicine_referral_prob = 0.15,
         ed_other_specialty_prob = 0.10,
 
-        mean_initial_medical_assessment_time = 60,
-        stdev_initial_medical_assessment_time = 20, 
+        mean_initial_medical_assessment_time = 30,
+        stdev_initial_medical_assessment_time = 15, 
 
         mean_consultant_assessment_time = 25,
         stdev_consultant_assessment_time = 10, 

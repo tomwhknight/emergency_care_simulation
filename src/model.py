@@ -48,19 +48,16 @@ class Model:
             "Day of Arrival",
             "Clock Hour of Arrival",
             "Hour of Arrival",
-            "Source of Referral"
+            "Source of Referral",
             "Mode of Arrival",
             "Acuity",
 
             # --- Triage Information ---
-            "Triage Location",
             "Queue Length Ambulance Triage Nurse",
             "Queue Length Walk in Triage Nurse",
             "Wait for Triage Nurse",
             "Triage Nurse Assessment Start Time",
-            "Triage Nurse Assessment Service Time"
-            "Triage Complete",
-            "Triage Outcome",
+            "Triage Nurse Assessment Service Time",
 
             # --- SDEC Referral Information ---
             "SDEC Accepted",
@@ -70,12 +67,10 @@ class Model:
 
             "Wait ED Assessment Time",
             "Queue Length ED doctor",
-            "ED Assessment Start Time",
-            "ED Assessment Time",
-            "Completed ED Assessment",
+            "ED Assessment Service Time",
+    
 
             # --- Referral to Medicine ---
-            "Simulation Referral Time",
             "Arrival to Referral",
 
             # --- AMU Admission ---
@@ -84,9 +79,8 @@ class Model:
 
             # --- Medical Assessment ---
             "Queue Length Medical Doctor",
-            "Simulation Time Medical Assessment Starts",
             "Wait for Medical Assessment",
-            "Initial Medical Assessment Time",
+            "Initial Medical Assessment Service Time",
             "Arrival to Medical Assessment",
 
             # --- Consultant Review ---
@@ -217,8 +211,6 @@ class Model:
             "Wait for Triage Nurse": 0.0,
             "Triage Nurse Assessment Start Time": 0.0,
             "Triage Nurse Assessment Service Time": 0.0,
-            "Triage Complete": 0.0,
-            "Triage Outcome": "",
 
             # --- SDEC Referral ---
             "SDEC Accepted": "",
@@ -229,10 +221,9 @@ class Model:
             "Wait ED Assessment Time": 0.0,
             "ED Assessment Start Time": 0.0,
             "ED Assessment Service Time": 0.0,
-            "Completed ED Assessment": 0.0,
+
 
             # --- Referral to Medicine ---
-            "Simulation Referral Time": 0.0,
             "Arrival to Referral": 0.0,
 
             # --- AMU Process ---
@@ -241,9 +232,8 @@ class Model:
 
             # --- Medical Assessment Process ---
             "Queue Length Medical Doctor": 0.0,
-            "Simulation Time Medical Assessment Starts": 0.0,
             "Wait for Medical Assessment": 0.0,
-            "Initial Medical Assessment Time": 0.0,
+            "Initial Medical Assessment Service Time": 0.0,
             "Arrival to Medical Assessment": 0.0,
 
             # --- Consultant Review Process ---
@@ -587,11 +577,13 @@ class Model:
             # Record the start time of ED assessment
             triage_nurse_assessment_start_time = self.env.now
             self.record_result(patient.id, "Triage Nurse Assessment Start Time", triage_nurse_assessment_start_time)
+            self.record_result(patient.id, "Wait for Triage Nurse", triage_nurse_assessment_start_time - patient.arrival_time)
             print(f"Patient {patient.id} starts triage assessment at {triage_nurse_assessment_start_time}")
 
             # Sample from the triage nurse assessment distribution 
             triage_nurse_assessment_time = self.triage_time_distribution.sample()
             yield self.env.timeout(triage_nurse_assessment_time)
+            print(f"Patient {patient.id} spends {triage_nurse_assessment_time} minutes in triage")
 
              # Record triage assessment time in the results # 
             self.record_result(patient.id, "Triage Nurse Assessment Service Time", triage_nurse_assessment_time)
@@ -613,11 +605,13 @@ class Model:
             # Record the start time of ED assessment
             triage_nurse_assessment_start_time = self.env.now
             self.record_result(patient.id, "Triage Nurse Assessment Start Time", triage_nurse_assessment_start_time)
+            self.record_result(patient.id, "Wait for Triage Nurse", triage_nurse_assessment_start_time - patient.arrival_time)
             print(f"Patient {patient.id} starts triage assessment at {triage_nurse_assessment_start_time}")
 
             # Sample from the triage nurse assessment distribution 
             triage_nurse_assessment_time = self.triage_time_distribution.sample()
             yield self.env.timeout(triage_nurse_assessment_time)
+            print(f"Patient {patient.id} spends {triage_nurse_assessment_time} minutes in triage")
 
              # Record triage assessment time in the results # 
             self.record_result(patient.id, "Triage Nurse Assessment Service Time", triage_nurse_assessment_time)
@@ -633,32 +627,22 @@ class Model:
         """Simulate ED assessment."""
         print(f"ED Doctor Queue at time of request: {len(self.ed_doctor.queue)} patients at time {self.env.now}")
         self.record_result(patient.id, "Queue Length ED doctor", len(self.ed_doctor.queue))
-        
-        ed_doctor_request_time = self.env.now
+    
         with self.ed_doctor.request() as req:
             yield req  # Wait until a doctor is available
             ed_assessment_start_time = self.env.now
-            ed_doctor_wait_time = ed_assessment_start_time - ed_doctor_request_time 
-            self.record_result(patient.id, "Wait ED Assessment Time", ed_doctor_wait_time)
-            
-
-            # Record the start time of ED assessment
-            ed_assessment_start_time = self.env.now
-            self.record_result(patient.id, "ED Assessment Start Time", ed_assessment_start_time)
+            ed_doctor_wait_time = ed_assessment_start_time - patient.arrival_time
             print(f"Patient {patient.id} starts ED assessment at {ed_assessment_start_time}")
-
+            self.record_result(patient.id, "Wait ED Assessment Time", ed_doctor_wait_time)
+       
             # Sample from the triage nurse assessment distribution 
             ed_assessment_time = self.ed_assessment_time_distribution.sample()
             yield self.env.timeout(ed_assessment_time)
+            print(f"Patient {patient.id} spends {ed_assessment_time} minutes with ED doctor")
             
             # Record ed assessment time in the results # 
             self.record_result(patient.id, "ED Assessment Service Time", ed_assessment_time)
             patient.ed_assessment_time = ed_assessment_time
-
-            # Calculate and record the total time from arrival to the end of ED assessment
-            time_at_end_of_ed_assessment = self.env.now - patient.arrival_time
-            self.record_result(patient.id, "Completed ED Assessment", time_at_end_of_ed_assessment)
-            print(f"Patient {patient.id} completes ED assessment at {self.env.now}")
 
             # Decide outcome of ED assessment
             ed_outcome = random.choices(
@@ -709,7 +693,6 @@ class Model:
                     )
                 yield self.env.timeout(decision_delay_admission)
                 patient.referral_to_medicine_time = self.env.now
-                self.record_result(patient.id, "Simulation Referral Time", patient.referral_to_medicine_time)
                 patient.ed_disposition = "Referred - Medicine"
                 print(f"Patient {patient.id} Referred - Medicine {patient.referral_to_medicine_time}")
                     
@@ -787,20 +770,17 @@ class Model:
 
              # Continue with medical assessment if not admitted
             end_medical_q = self.env.now
-            self.record_result(patient.id, "Simulation Time Medical Assessment Starts", end_medical_q)
-            print(f"{end_medical_q:.2f}: Medical doctor starts assessing Patient {patient.id}.")
-
-
-            # Calculate the waiting time from queue entry to start of medical assessment
             wait_for_medical = end_medical_q - start_medical_queue_time
             self.record_result(patient.id, "Wait for Medical Assessment", wait_for_medical)
+            print(f"{end_medical_q:.2f}: Medical doctor starts assessing Patient {patient.id}.")
 
             # Sample the medical assessment time from a specified distribution
             med_assessment_time = random.expovariate(1.0 / self.global_params.mean_initial_medical_assessment_time)
             yield self.env.timeout(med_assessment_time)
+            print(f"Patient {patient.id} spends {med_assessment_time} minutes with medical doctor")
             
             # Record the initial medical assessment time
-            self.record_result(patient.id, "Initial Medical Assessment Time", med_assessment_time)
+            self.record_result(patient.id, "Initial Medical Assessment Service Time", med_assessment_time)
             patient.initial_medical_assessment_time = med_assessment_time
             print(f"Patient {patient.id} completes initial medical assessment at {self.env.now}")
             
@@ -875,7 +855,9 @@ class Model:
 
             # Simulate the actual triage assessment time using the lognormal distribution
             consultant_assessment_time = self.consultant_time_distribution.sample()
-            patient.consultant_assessment_time = consultant_assessment_time 
+            patient.consultant_assessment_time = consultant_assessment_time
+            print(f"Patient {patient.id} spends {consultant_assessment_time} minutes with consultant")
+             
 
             # Record the consultant assessment time
             self.record_result(patient.id, "Consultant Assessment Time", consultant_assessment_time)
