@@ -68,8 +68,8 @@ class Model:
             "Wait ED Assessment Time",
             "Queue Length ED doctor",
             "ED Assessment Service Time",
+            "ED Assessment to Decision",
     
-
             # --- Referral to Medicine ---
             "Arrival to Referral",
 
@@ -115,9 +115,9 @@ class Model:
 
         # Create simpy resources for staffing levels
         self.ambulance_triage_nurse = simpy.Resource(self.env, capacity=self.global_params.ambulance_triage_nurse_capacity)
-        self.walk_in_triage_nurse = simpy.Resource(self.env, capacity = self.global_params.walk_in_triage_nurse_capacity)
-
+        
         # Create simpy resources for ED clinical assessment
+        self.walk_in_triage_nurse = simpy.PriorityResource(self.env, capacity = self.global_params.walk_in_triage_nurse_capacity)
         self.ed_doctor = simpy.PriorityResource(self.env, capacity=self.global_params.ed_doctor_capacity)
         self.medical_doctor = simpy.PriorityResource(self.env, capacity=self.global_params.medical_doctor_capacity)
         self.consultant = simpy.PriorityResource(self.env, capacity=self.global_params.consultant_capacity)
@@ -221,6 +221,7 @@ class Model:
             "Wait ED Assessment Time": 0.0,
             "ED Assessment Start Time": 0.0,
             "ED Assessment Service Time": 0.0,
+            "ED Assessment to Decision": 0.0,
 
 
             # --- Referral to Medicine ---
@@ -408,25 +409,25 @@ class Model:
 
     # --- Dynamic resource modelling ---
 
-    # Method to model consultant working hours 
-    def obstruct_consultant(self):
-        """Simulate consultant unavailability between 21:00 and 07:00."""
+    # Method to block walk-in triage nurse 
+    def obstruct_triage_nurse(self):
+        """Simulate increased traige nurse capacity in peak hours 12:00 and 22:00."""
         while True:
             # Extract the current hour
             current_hour = extract_hour(self.env.now)
 
             # Check if the current time is within the off-duty period (21:00–07:00)
-            if current_hour >= 21 or current_hour < 7:
+            if current_hour >= 22 or current_hour < 12:
                 print(f"{self.env.now:.2f}: Consultants are off-duty (21:00–07:00).")
-                with self.consultant.request(priority=-1) as req:
+                with self.walk_in_triage_nurse.request(priority=-1) as req:
                     yield req  # Block the resource
                     yield self.env.timeout(60)  # Hold the block for 1 hour
             else:
-                print(f"{self.env.now:.2f}: Consultants are available.")
+                print(f"{self.env.now:.2f}: Triage nurse capacity increased")
 
             # Wait until the next hour to check again
             yield self.env.timeout(60)
-    
+
     # Method to model ED doctor working hours
     def obstruct_ed_doctor(self):
         """Simulate ED doctor unavailability based on shift patterns."""
@@ -516,10 +517,30 @@ class Model:
     
     # Method to block medical doctor
     def block_medical_doctor(self, block_duration):
+
         """Simulate blocking a medical doctor for a specific duration."""
         with self.medical_doctor.request(priority=-1) as req:
             yield req  # Acquire the resource to simulate it being blocked
             yield self.env.timeout(block_duration)  # Simulate the blocking period
+    
+    # Method to block consultants 
+    def obstruct_consultant(self):
+        """Simulate consultant unavailability between 21:00 and 07:00."""
+        while True:
+            # Extract the current hour
+            current_hour = extract_hour(self.env.now)
+
+            # Check if the current time is within the off-duty period (21:00–07:00)
+            if current_hour >= 21 or current_hour < 7:
+                print(f"{self.env.now:.2f}: Consultants are off-duty (21:00–07:00).")
+                with self.consultant.request(priority=-1) as req:
+                    yield req  # Block the resource
+                    yield self.env.timeout(60)  # Hold the block for 1 hour
+            else:
+                print(f"{self.env.now:.2f}: Consultants are available.")
+
+            # Wait until the next hour to check again
+            yield self.env.timeout(60)
     
     # Method to refer to sdec
     def refer_to_sdec(self, patient, fallback_process):
@@ -592,7 +613,6 @@ class Model:
          # After triage, proceed to SDEC referral process (with ED assessment as fallback)
         yield self.env.process(self.refer_to_sdec(patient, fallback_process = self.ed_assessment))
 
-
     def ambulance_triage(self, patient):
         """Simulate triage assessment for Ambulance"""
         print(f"Ambulance Triage Queue at time of request: {len(self.ambulance_triage_nurse.queue)} patients at time {self.env.now}")
@@ -644,67 +664,70 @@ class Model:
             self.record_result(patient.id, "ED Assessment Service Time", ed_assessment_time)
             patient.ed_assessment_time = ed_assessment_time
 
-            # Decide outcome of ED assessment
-            ed_outcome = random.choices(
-                population=["Discharge", "Medicine", "OtherSpecialty"],
-                weights=[
-                    self.global_params.ed_discharge_prob,
-                    self.global_params.ed_medicine_referral_prob,
-                    self.global_params.ed_other_specialty_prob
-                ],
-                k=1
-            )[0]
-            print(f"Patient {patient.id} ED outcome: {ed_outcome}")
+        # Decide outcome of ED assessment
+        ed_outcome = random.choices(
+            population=["Discharge", "Medicine", "OtherSpecialty"],
+            weights=[
+                self.global_params.ed_discharge_prob,
+                self.global_params.ed_medicine_referral_prob,
+                self.global_params.ed_other_specialty_prob
+            ],
+            k=1
+        )[0]
+        print(f"Patient {patient.id} ED outcome: {ed_outcome}")
 
-            # Route accordingly
-            if ed_outcome == "Discharge":
-                decision_delay_discharge = np.random.lognormal(
-                    mean = self.global_params.mu_ed_delay_time_discharge, 
-                    sigma = self.global_params.sigma_ed_delay_time_discharge)
-                yield self.env.timeout(decision_delay_discharge)       
-                patient.discharge_time = self.env.now
-                time_in_system = patient.discharge_time - patient.arrival_time
-                self.record_result(patient.id, "Discharge Time", patient.discharge_time)
-                self.record_result(patient.id, "Discharge Decision Point", "ed_discharge")
-                self.record_result(patient.id, "Time in System", time_in_system)
-                patient.ed_disposition = "Discharged ED"
-                print(f"Patient {patient.id} discharged from ED at {patient.discharge_time}")
-                return
+        # Route accordingly
+        if ed_outcome == "Discharge":
+            decision_delay_discharge = np.random.lognormal(
+                mean = self.global_params.mu_ed_delay_time_discharge, 
+                sigma = self.global_params.sigma_ed_delay_time_discharge)
+            yield self.env.timeout(decision_delay_discharge)       
+            patient.discharge_time = self.env.now
+            time_in_system = patient.discharge_time - patient.arrival_time
+            self.record_result(patient.id, "ED Assessment to Decision", decision_delay_discharge)
+            print(f"Patient {patient.id} Discharged {decision_delay_discharge} after ED assessment")
+            self.record_result(patient.id, "Discharge Time", patient.discharge_time)
+            self.record_result(patient.id, "Discharge Decision Point", "ed_discharge")
+            self.record_result(patient.id, "Time in System", time_in_system)
+            patient.ed_disposition = "Discharged ED"
+            print(f"Patient {patient.id} discharged from ED at {patient.discharge_time}")
+            return
 
-            elif ed_outcome == "OtherSpecialty":
-                decision_delay_admission = np.random.lognormal(
-                    mean = self.global_params.mu_ed_delay_time_admission, 
-                    sigma = self.global_params.sigma_ed_delay_time_admission
-                    )
-                yield self.env.timeout(decision_delay_admission)
-                pseudo_departure_time = self.env.now
-                time_in_system = pseudo_departure_time - patient.arrival_time
-                self.record_result(patient.id, "Time in System", time_in_system)
-                self.record_result(patient.id, "Discharge Decision Point", "ed_referred_other_specialty_pseudo_exit")
-                self.record_result(patient.id, "Discharge Time", pseudo_departure_time)
-                patient.ed_disposition = "Admit - Other Speciality"
-                print(f"Patient {patient.id} Referred - Other Speciality {pseudo_departure_time}")
-                return
+        elif ed_outcome == "OtherSpecialty":
+            decision_delay_admission = np.random.lognormal(
+                mean = self.global_params.mu_ed_delay_time_admission, 
+                sigma = self.global_params.sigma_ed_delay_time_admission
+                )
+            yield self.env.timeout(decision_delay_admission)
+            pseudo_departure_time = self.env.now
+            time_in_system = pseudo_departure_time - patient.arrival_time
+            print(f"Patient {patient.id} Referred - Other Speciality {decision_delay_admission} after ED assessment")
+            self.record_result(patient.id, "ED Assessment to Decision", decision_delay_admission)
+            self.record_result(patient.id, "Time in System", time_in_system)
+            self.record_result(patient.id, "Discharge Decision Point", "ed_referred_other_specialty_pseudo_exit")
+            self.record_result(patient.id, "Discharge Time", pseudo_departure_time)
+            patient.ed_disposition = "Admit - Other Speciality"
+            return
 
-            elif ed_outcome == "Medicine":
-                decision_delay_admission = np.random.lognormal(
-                    mean = self.global_params.mu_ed_delay_time_admission, 
-                    sigma = self.global_params.sigma_ed_delay_time_admission
-                    )
-                yield self.env.timeout(decision_delay_admission)
-                patient.referral_to_medicine_time = self.env.now
-                patient.ed_disposition = "Referred - Medicine"
-                print(f"Patient {patient.id} Referred - Medicine {patient.referral_to_medicine_time}")
+        elif ed_outcome == "Medicine":
+            decision_delay_admission = np.random.lognormal(
+                mean = self.global_params.mu_ed_delay_time_admission, 
+                sigma = self.global_params.sigma_ed_delay_time_admission
+                )
+            yield self.env.timeout(decision_delay_admission)
+            patient.referral_to_medicine_time = self.env.now
+            patient.ed_disposition = "Referred - Medicine"
+            self.record_result(patient.id, "ED Assessment to Decision", decision_delay_admission)
+            print(f"Patient {patient.id} referred to Medicine {decision_delay_admission} after ED assessment")
+
                     
-                    # Record total time from arrival to referral
-                    
-                total_time_referral = self.env.now - patient.arrival_time
-                self.record_result(patient.id, "Arrival to Referral", total_time_referral)
+            # Record total time from arrival to referral    
+            total_time_referral = self.env.now - patient.arrival_time
+            self.record_result(patient.id, "Arrival to Referral", total_time_referral)
                 
-                # Pass on to downstream Medicine pathway
-                yield self.env.process(self.handle_ed_referral(patient))
+            # Pass on to downstream Medicine pathway
+            yield self.env.process(self.handle_ed_referral(patient))
             
-
     def handle_ed_referral(self, patient):
         """Handles referral after ED assessment when SDEC is rejected.
         Ensures patient is referred to AMU queue while also starting medical assessment."""
@@ -962,6 +985,9 @@ class Model:
 
         # Start monitoring the AMU bed queue
         self.env.process(self.monitor_amu_queue())
+
+        # Start the triage nurse obstruction process for shifts
+        self.env.process(self.obstruct_triage_nurse())
 
         # Start the ED doctor obstruction process for shifts
         self.env.process(self.obstruct_ed_doctor())

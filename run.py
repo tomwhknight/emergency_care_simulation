@@ -32,29 +32,30 @@ if __name__ == "__main__":
 
         # Staffing resource
         ambulance_triage_nurse_capacity = 1,
-        walk_in_triage_nurse_capacity = 1,
+        walk_in_triage_nurse_capacity = 2,
 
-        ed_doctor_capacity = 34,
+        # 34
+        ed_doctor_capacity = 20,
         medical_doctor_capacity = 5,
         consultant_capacity = 1, 
 
-    
         # SDEC capacity
-
         sdec_open_hour = 8, 
         sdec_close_hour = 18,
 
         weekday_sdec_base_capacity = 7,
         weekend_sdec_base_capacity = 5, 
 
+        # AMU capacity
         max_amu_available_beds = 10,
         max_sdec_capacity = 30,
 
-        mean_triage_assessment_time = 6,
+        # Service times
+        mean_triage_assessment_time = 5,
         stdev_triage_assessment_time = 2,
         
-        mean_ed_assessment_time = 30.0,
-        stdev_ed_assessment_time = 15,
+        mean_ed_assessment_time = 60,
+        stdev_ed_assessment_time = 20,
 
         mu_ed_delay_time_discharge = 4.5,
         sigma_ed_delay_time_discharge = 1.0,
@@ -74,14 +75,13 @@ if __name__ == "__main__":
 
         mean_sdec_assessment_time = 480,
         stdev_sdec_assessment_time = 60,
-
        
         medicine_discharge_prob = 0.10,
     
         mean_amu_bed_release_interval = 30,
         mean_sdec_capacity_release_interval = 30,
         
-        simulation_time= 1440,
+        simulation_time= 2880,
         burn_in_time = 0) # burn in to prevent initiation bias
         
     trial = Trial(global_params)
