@@ -647,8 +647,15 @@ class Model:
         """Simulate ED assessment."""
         print(f"ED Doctor Queue at time of request: {len(self.ed_doctor.queue)} patients at time {self.env.now}")
         self.record_result(patient.id, "Queue Length ED doctor", len(self.ed_doctor.queue))
-    
-        with self.ed_doctor.request() as req:
+
+        # Determine priority level locally based on acuity
+        if patient.acuity in [1, 2]:
+            priority_level = 0
+        else:
+            priority_level = 1
+
+        # Request the ED doctor resource
+        with self.ed_doctor.request(priority = priority_level) as req:
             yield req  # Wait until a doctor is available
             ed_assessment_start_time = self.env.now
             ed_doctor_wait_time = ed_assessment_start_time - patient.arrival_time
