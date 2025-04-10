@@ -1,10 +1,10 @@
 class Patient:
     """Class representing a patient in the system."""
-    def __init__(self, patient_id, arrival_time, day_of_arrival, arrival_clock_time, current_hour, source_of_referral, mode_arrival, acuity, priority = 1):
+    def __init__(self, patient_id, arrival_time, current_day, clock_hour, current_hour, source_of_referral, mode_arrival, acuity, priority = 1):
         self.id = patient_id
         self.arrival_time = arrival_time
-        self.arrival_clock_time = arrival_clock_time
-        self.day_of_arrival = day_of_arrival
+        self.current_day = current_day 
+        self.clock_hour = clock_hour
         self.current_hour = current_hour
         
         # Patient characteristics 
@@ -34,7 +34,7 @@ class Patient:
         
         # Record disporition 
         self.ed_disposition = None  # Will be 'Admit - Medicine', 'Admit - Other' or 'Discharge'
-        self.discharged = None
+        self.discharged = False
        
         # Binary metrics initialized to 0 (not exceeding thresholds yet)
         self.ed_4hrs_after_arrival = 0

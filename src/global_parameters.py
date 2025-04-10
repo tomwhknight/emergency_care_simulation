@@ -40,13 +40,16 @@ class GlobalParameters:
                  ed_discharge_prob,
                  ed_medicine_referral_prob,
                  ed_other_specialty_prob,
+
+                 initial_medicine_discharge_prob,
+                 consultant_discharge_prob,
           
                  mean_consultant_assessment_time,
                  stdev_consultant_assessment_time, 
                  mean_sdec_assessment_time,
                  stdev_sdec_assessment_time,
-                 medicine_discharge_prob,
-                 mean_amu_bed_release_interval,    
+                 
+                 
                  burn_in_time,
                  simulation_time):
 
@@ -57,14 +60,10 @@ class GlobalParameters:
         self.arrival_rate_file = os.path.join(self.project_dir, "data/generator_distributions/arrival_rate.csv")
         self.amu_bed_rate_file = os.path.join(self.project_dir, "data/generator_distributions/amu_bed_rate.csv")
         
-        
+    
         # Define the file path for staffing resources
         self.ed_staffing_file = os.path.join(self.project_dir, "data/staffing_resource/ed_staffing.csv")
         self.medicine_staffing_file = os.path.join(self.project_dir, "data/staffing_resource/medicine_staffing.csv")
-        
-        
-    
-      
         
         # Mode of arrival
         self.ambulance_proportion = ambulance_proportion
@@ -78,15 +77,15 @@ class GlobalParameters:
         self.proportion_direct_primary_care = proportion_direct_primary_care
 
         # ED disposition probabilities
-
         self.ed_discharge_prob = ed_discharge_prob
         self.ed_medicine_referral_prob = ed_medicine_referral_prob
         self.ed_other_specialty_prob = ed_other_specialty_prob
 
         # Medicine discharge probabilities
 
-        self.medicine_discharge_prob = medicine_discharge_prob
-        
+        self.initial_medicine_discharge_prob = initial_medicine_discharge_prob
+        self.consultant_discharge_prob = consultant_discharge_prob
+      
         # Define the resources
 
         self.ambulance_triage_nurse_capacity = ambulance_triage_nurse_capacity
@@ -127,9 +126,6 @@ class GlobalParameters:
 
         self.mean_sdec_assessment_time = mean_sdec_assessment_time
         self.stdev_sdec_assessment_time = stdev_sdec_assessment_time
-
-        # AMU bed release 
-        self.mean_amu_bed_release_interval = mean_amu_bed_release_interval
 
         # Sim duration
         self.burn_in_time = burn_in_time
