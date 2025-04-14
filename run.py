@@ -34,7 +34,6 @@ if __name__ == "__main__":
         ambulance_triage_nurse_capacity = 1,
         walk_in_triage_nurse_capacity = 2,
 
-        # 34
         ed_doctor_capacity = 20,
         medical_doctor_capacity = 5,
         consultant_capacity = 1, 
@@ -81,8 +80,8 @@ if __name__ == "__main__":
           
         mean_sdec_capacity_release_interval = 30,
     
-        simulation_time = 1440,
-        burn_in_time = 0) # burn in to prevent initiation bias
+        simulation_time = 10000,
+        burn_in_time = 1440) # burn in to prevent initiation bias
         
     trial = Trial(global_params)
     total_runs = 2
