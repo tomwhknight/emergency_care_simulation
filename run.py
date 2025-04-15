@@ -39,15 +39,15 @@ if __name__ == "__main__":
         consultant_capacity = 1, 
 
         # SDEC capacity
-        sdec_open_hour = 7, 
+        sdec_open_hour = 8, 
         sdec_close_hour = 16,
 
-        weekday_sdec_base_capacity = 10,
-        weekend_sdec_base_capacity = 5, 
+        weekday_sdec_base_capacity = 4,
+        weekend_sdec_base_capacity = 4, 
 
         # AMU capacity
         max_amu_available_beds = 20,
-        max_sdec_capacity = 30,
+        max_sdec_capacity = 10,
 
         # Service times
         mean_triage_assessment_time = 5,
@@ -80,7 +80,7 @@ if __name__ == "__main__":
           
         mean_sdec_capacity_release_interval = 30,
     
-        simulation_time = 10000,
+        simulation_time = 2880,
         burn_in_time = 1440) # burn in to prevent initiation bias
         
     trial = Trial(global_params)

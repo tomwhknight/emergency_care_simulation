@@ -59,7 +59,7 @@ class GlobalParameters:
          # Define the file path for generators
         self.arrival_rate_file = os.path.join(self.project_dir, "data/generator_distributions/arrival_rate.csv")
         self.amu_bed_rate_file = os.path.join(self.project_dir, "data/generator_distributions/amu_bed_rate.csv")
-        
+        self.sdec_slot_rate_file = os.path.join(self.project_dir, "data/generator_distributions/sdec_slot_rate.csv")    
     
         # Define the file path for staffing resources
         self.ed_staffing_file = os.path.join(self.project_dir, "data/staffing_resource/ed_staffing.csv")
