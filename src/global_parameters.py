@@ -10,6 +10,7 @@ class GlobalParameters:
                  ambulance_acuity_probabilities, 
                  walk_in_acuity_probabilities,
                  sdec_threshold,
+                 ed_threshold, 
 
                  ambulance_triage_nurse_capacity,
                  walk_in_triage_nurse_capacity,  
@@ -40,10 +41,6 @@ class GlobalParameters:
 
                  mu_ed_delay_time_admission, 
                  sigma_ed_delay_time_admission, 
-
-                 ed_discharge_prob,
-                 ed_medicine_referral_prob,
-                 ed_other_specialty_prob,
 
                  initial_medicine_discharge_prob,
                  consultant_discharge_prob,
@@ -81,12 +78,11 @@ class GlobalParameters:
         # Source of referral 
         self.proportion_direct_primary_care = proportion_direct_primary_care
 
-        self.sdec_threshold = sdec_threshold
+        # Outcome thresholds
 
-        # ED disposition probabilities
-        self.ed_discharge_prob = ed_discharge_prob
-        self.ed_medicine_referral_prob = ed_medicine_referral_prob
-        self.ed_other_specialty_prob = ed_other_specialty_prob
+        self.sdec_threshold = sdec_threshold
+        self.ed_threshold = ed_threshold
+
 
         # Medicine discharge probabilities
 

@@ -33,6 +33,7 @@ if __name__ == "__main__":
         # Patient characteristic variables
 
         sdec_threshold = 0.60,
+        ed_threshold = .5,
 
         # Staffing resource
         ambulance_triage_nurse_capacity = 1,
@@ -66,10 +67,6 @@ if __name__ == "__main__":
         mu_ed_delay_time_admission = 4.6,
         sigma_ed_delay_time_admission = 1.2,
 
-        ed_discharge_prob = 0.75,
-        ed_medicine_referral_prob = 0.15,
-        ed_other_specialty_prob = 0.10,
-
         mean_initial_medical_assessment_time = 60,
         stdev_initial_medical_assessment_time = 30, 
 
@@ -79,8 +76,8 @@ if __name__ == "__main__":
         initial_medicine_discharge_prob = 0.1,
         consultant_discharge_prob = 0.3,
         
-        simulation_time = 2880,
-        burn_in_time = 1440) # burn in to prevent initiation bias
+        simulation_time = 1440,
+        burn_in_time = 0) # burn in to prevent initiation bias
         
     trial = Trial(global_params)
     total_runs = 2

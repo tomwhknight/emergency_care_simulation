@@ -59,6 +59,7 @@ class Model:
             "Source of Referral",
             "Mode of Arrival",
             "Acuity",
+            "ED Disposition",
 
             # --- Triage Information ---
             "Queue Length Ambulance Triage Nurse",
@@ -246,7 +247,33 @@ class Model:
             else:
                 sdec_appropriate = np.nan
 
+            # ED disposition 
+
+            if not adult:
+                ed_disposition = random.choices(
+                    ["Discharge", "Refer - Paeds"],
+                    weights=[0.9, 0.1],
+                    k=1
+                )[0]
+            else:
+
+                if random.random() < 0.05:
+                    ed_disposition = "Refer - Speciality"
+            
+                else:
+                    # Apply tunable policy threshold
+                    threshold = self.global_params.ed_threshold
+                    prob_medicine = min(admission_prob * threshold, 1)
+                    prob_discharge = 1 - prob_medicine
+
+                    ed_disposition = random.choices(
+                        ["Discharge", "Refer - Medicine"],
+                        weights=[prob_discharge, prob_medicine],
+                        k=1
+                    )[0]
+
             # Create instance of patient class
+            
             patient = Patient(
             self.patient_counter,
             arrival_time,
@@ -260,7 +287,9 @@ class Model:
             news2,
             admission_prob, 
             acuity,
-            sdec_appropriate)
+            sdec_appropriate,
+            ed_disposition
+            )
 
             # Initialise a dictionary of patient results 
 
@@ -278,8 +307,9 @@ class Model:
             "Admission Probability": admission_prob ,
             "Source of Referral": source_of_referral,
             "Acuity": acuity,
+            "ED Disposition": ed_disposition,
 
-    
+
             # --- Triage-Related Metrics ---
             "Queue Length Walk in Triage Nurse": np.nan,
             "Queue Length Ambulance Triage Nurse": np.nan,
@@ -633,7 +663,6 @@ class Model:
     def refer_to_sdec(self, patient, fallback_process):
         """Simulate process of referral to SDEC"""
 
-        print(f"[{self.env.now:.2f}] Checking SDEC referral for patient {patient.id}, adult = {patient.adult}") 
         if not patient.adult:
             self.record_result(patient.id, "SDEC Accepted", np.nan)
             self.record_result(patient.id, "SDEC Decision Reason", "Rejected: Paediatric")
@@ -756,17 +785,8 @@ class Model:
             self.record_result(patient.id, "ED Assessment Service Time", ed_assessment_time)
             patient.ed_assessment_time = ed_assessment_time
 
-        # Decide outcome of ED assessment
-        ed_outcome = random.choices(
-            population=["Discharge", "Medicine", "OtherSpecialty"],
-            weights=[
-                self.global_params.ed_discharge_prob,
-                self.global_params.ed_medicine_referral_prob,
-                self.global_params.ed_other_specialty_prob
-            ],
-            k=1
-        )[0]
-        print(f"Patient {patient.id} ED outcome: {ed_outcome}")
+        ed_outcome = patient.ed_disposition
+        print(f"Patient {patient.id} ED outcome (predefined): {ed_outcome}")
 
         # Route accordingly
         if ed_outcome == "Discharge":
@@ -780,11 +800,10 @@ class Model:
             print(f"Patient {patient.id} Discharged {decision_delay_discharge} after ED assessment")
             self.record_result(patient.id, "Discharge Decision Point", "ed_discharge")
             self.record_result(patient.id, "Time in System", time_in_system)
-            patient.ed_disposition = "Discharged ED"
             print(f"Patient {patient.id} discharged from ED at {patient.discharge_time}")
             return
 
-        elif ed_outcome == "OtherSpecialty":
+        elif ed_outcome == "Refer - Speciality":
             decision_delay_admission = np.random.lognormal(
                 mean = self.global_params.mu_ed_delay_time_admission, 
                 sigma = self.global_params.sigma_ed_delay_time_admission
@@ -792,25 +811,22 @@ class Model:
             yield self.env.timeout(decision_delay_admission)
             pseudo_departure_time = self.env.now
             time_in_system = pseudo_departure_time - patient.arrival_time
-            print(f"Patient {patient.id} Referred - Other Speciality {decision_delay_admission} after ED assessment")
+            print(f"Patient {patient.id} Referred - Speciality {decision_delay_admission} after ED assessment")
             self.record_result(patient.id, "ED Assessment to Decision", decision_delay_admission)
             self.record_result(patient.id, "Time in System", time_in_system)
             self.record_result(patient.id, "Discharge Decision Point", "ed_referred_other_specialty_pseudo_exit")
-            patient.ed_disposition = "Admit - Other Speciality"
             return
 
-        elif ed_outcome == "Medicine":
+        elif ed_outcome == "Refer - Medicine":
             decision_delay_admission = np.random.lognormal(
                 mean = self.global_params.mu_ed_delay_time_admission, 
                 sigma = self.global_params.sigma_ed_delay_time_admission
                 )
             yield self.env.timeout(decision_delay_admission)
             patient.referral_to_medicine_time = self.env.now
-            patient.ed_disposition = "Referred - Medicine"
             self.record_result(patient.id, "ED Assessment to Decision", decision_delay_admission)
             print(f"Patient {patient.id} referred to Medicine {decision_delay_admission} after ED assessment")
-
-                    
+  
             # Record total time from arrival to referral    
             total_time_referral = self.env.now - patient.arrival_time
             self.record_result(patient.id, "Arrival to Referral", total_time_referral)
@@ -1064,6 +1080,10 @@ class Model:
         }).T.reset_index()
 
         complete_data.columns = ['measure', 'mean_value']
+
+        # Add proportion referred to Medicine
+        prop_medicine = copy['ED Disposition'].value_counts(normalize=True).get("Refer - Medicine", 0)
+        complete_data.loc[len(complete_data.index)] = ['Proportion Referred - Medicine', prop_medicine]
 
 
         # Store the aggregated results

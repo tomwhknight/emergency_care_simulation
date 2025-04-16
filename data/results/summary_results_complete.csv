@@ -1,10 +1,11 @@
 measure,mean_value
-Arrival to Triage Nurse Assessment,4.253222503438785
-Arrival to ED Assessment,140.8660839837148
-Arrival to Referral,314.55640851401904
-Arrival to Medical Assessment,15.27750400458142
-Arrival to Consultant Assessment,454.6539924068375
-SDEC Appropriate,0.2664359861591695
-SDEC Accepted,0.01730103806228374
->4hr breach,0.46703296703296704
->12hr breach,0.016483516483516484
+Arrival to Triage Nurse Assessment,18.168499247080813
+Arrival to ED Assessment,95.48971757318539
+Arrival to Referral,257.48335972000154
+Arrival to Medical Assessment,19.737618850961198
+Arrival to Consultant Assessment,375.65411229423626
+SDEC Appropriate,0.24390243902439024
+SDEC Accepted,0.08013937282229965
+>4hr breach,0.31151832460732987
+>12hr breach,0.002617801047120419
+Proportion Referred - Medicine,0.20680628272251309

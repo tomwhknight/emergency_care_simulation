@@ -1,6 +1,6 @@
 class Patient:
     """Class representing a patient in the system."""
-    def __init__(self, patient_id, arrival_time, current_day, clock_hour, current_hour, source_of_referral, mode_arrival, age, adult, news2, admission_prob, acuity, sdec_appropriate, priority = 1):
+    def __init__(self, patient_id, arrival_time, current_day, clock_hour, current_hour, source_of_referral, mode_arrival, age, adult, news2, admission_prob, acuity, sdec_appropriate, ed_disposition, priority = 1):
         self.id = patient_id
         self.arrival_time = arrival_time
         self.current_day = current_day 
@@ -17,6 +17,7 @@ class Patient:
         self.admission_prob = admission_prob
         self.acuity = acuity 
         self.sdec_appropriate = sdec_appropriate
+        self.ed_disposition = ed_disposition
 
         # Track outcomes
         
@@ -25,7 +26,6 @@ class Patient:
 
         
         # Record disporition 
-        self.ed_disposition = None  # Will be 'Admit - Medicine', 'Admit - Other' or 'Discharge'
         self.discharged = False
        
         # Initialize AMU-related attributes
