@@ -65,6 +65,10 @@ class GlobalParameters:
         self.ed_staffing_file = os.path.join(self.project_dir, "data/staffing_resource/ed_staffing.csv")
         self.medicine_staffing_file = os.path.join(self.project_dir, "data/staffing_resource/medicine_staffing.csv")
         
+        # Define the file path for patient attributes
+        self.news2_file = os.path.join(self.project_dir, "data/patient_attributes/news2_distribution.csv")
+        self.admission_prob_file = os.path.join(self.project_dir, "data/patient_attributes/admission_prob_distribution.csv")
+
         # Mode of arrival
         self.ambulance_proportion = ambulance_proportion
         self.walk_in_proportion = walk_in_proportion

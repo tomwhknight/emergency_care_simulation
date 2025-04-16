@@ -1,0 +1,5 @@
+"group","dist","shape1","shape2","mean","sd"
+"high_age_high_news","beta",13.1494681935063,1.21039851950179,NA,NA
+"high_age_low_news","beta",4.66460777434159,1.58991323797542,NA,NA
+"working_age_low_news","norm",NA,NA,0.466478953184656,0.236729982058426
+"working_age_high_news","beta",4.06754180752705,0.843026467850762,NA,NA

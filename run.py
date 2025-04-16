@@ -39,7 +39,7 @@ if __name__ == "__main__":
         consultant_capacity = 1, 
 
         # SDEC capacity
-        sdec_open_hour = 8, 
+        sdec_open_hour = 7, 
         sdec_close_hour = 16,
 
         weekday_sdec_base_capacity = 4,

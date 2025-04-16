@@ -23,6 +23,8 @@ class Model:
         self.amu_bed_rate_data = pd.read_csv(self.global_params.amu_bed_rate_file)
         self.sdec_slot_rate_data = pd.read_csv(self.global_params.sdec_slot_rate_file)
         self.arrival_rate_data = pd.read_csv(self.global_params.arrival_rate_file)
+        self.news_distribution_data = pd.read_csv(self.global_params.news2_file)
+        self.admission_prob_distribution_data = pd.read_csv(self.global_params.admission_prob_file)
 
         # Instantiate the Lognormal distribution for triage assessment time
         self.triage_time_distribution = Lognormal(mean=self.global_params.mean_triage_assessment_time,
@@ -34,7 +36,6 @@ class Model:
         self.medical_assessment_time_distribution = Lognormal(mean=self.global_params.mean_initial_medical_assessment_time,
                                                   stdev=self.global_params.stdev_initial_medical_assessment_time)
         
-
         self.consultant_time_distribution = Lognormal(mean=self.global_params.mean_consultant_assessment_time, 
                                                    stdev=self.global_params.stdev_consultant_assessment_time)
         
@@ -54,6 +55,10 @@ class Model:
             "Day of Arrival",
             "Clock Hour of Arrival",
             "Hour of Arrival",
+            "Patient Age",
+            "Adult",
+            "NEWS2",
+            "Admission Probability",
             "Source of Referral",
             "Mode of Arrival",
             "Acuity",
@@ -151,10 +156,23 @@ class Model:
                                          weights=[self.global_params.ambulance_proportion, 
                                                   self.global_params.walk_in_proportion])[0]
 
-            # Explicitly assign source of referral
+            # Assign source of referral
 
-            
+            age_weights = {}
+
+            for age in range(0, 5):
+                age_weights[age] = 2       # Ages 0–4 → weight 2
+            for age in range(5, 80):
+                age_weights[age] = 1       # Ages 5–79 → weight 1
+            for age in range(80, 101):
+                age_weights[age] = 0.5     # Ages 80–100 → weight 0.5
+
+            age_values = list(age_weights.keys())
+            age_probs = list(age_weights.values())
+            age = int(round(random.choices(age_values, weights=age_probs, k=1)[0]))
+
             # Assign mode of arrival and admission probability based on mode of arrival
+
             if mode_of_arrival == "Ambulance":
                 acuity_levels = list(self.global_params.ambulance_acuity_probabilities.keys())
                 acuity_weights = list(self.global_params.ambulance_acuity_probabilities.values())
@@ -163,9 +181,59 @@ class Model:
                 acuity_weights = list(self.global_params.walk_in_acuity_probabilities.values())
 
             acuity = random.choices(acuity_levels, weights=acuity_weights, k=1)[0]
+            
+            # Assign source of referral
+            
+            news2_values = self.news_distribution_data["news2"].tolist()
+            news2_weights = self.news_distribution_data["news2_probs"].tolist()
+            news2 = random.choices(news2_values, weights=news2_weights, k=1)[0]
 
+            # Determine if patient is adult
+            adult = age >= 17  # You can adjust threshold if needed
 
-            # Explicitly assign source of referral
+            print(age)
+            print(adult)
+            print(news2)
+           
+
+            # Determine group label based on patient age and NEWS2
+            if not adult:
+                group = "under_17"
+            elif age >= 75 and news2 > 4:
+                group = "high_age_high_news"
+            elif age >= 75 and news2 <= 4:
+                group = "high_age_low_news"
+            elif 17 <= age < 75 and news2 <= 4:
+                group = "working_age_low_news"
+            elif 17 <= age < 75 and news2 > 4:
+                group = "working_age_high_news"
+            else:
+                group = "unknown"
+
+            if adult:
+                params = self.admission_prob_distribution_data[
+                    self.admission_prob_distribution_data["group"] == group
+                    ].iloc[0]
+
+                # Sample from Beta distribution
+                if params["dist"] == "beta":
+                    a = params["shape1"]
+                    b = params["shape2"]
+                    admission_prob = random.betavariate(a, b) 
+
+                elif params["dist"] == "norm":
+                    mu = params["mean"]
+                    sigma = params["sd"]
+                    admission_prob = random.gauss(mu, sigma)
+
+                # Clip probability to [0, 1]
+                admission_prob = min(max(admission_prob, 0), 1)
+
+            else:
+                admission_prob = np.nan  # or np.nan if using pandas later
+            
+            # Assign source of referral
+
             source_of_referral = random.choices(
                 ["GP", "ED"],
             weights=[
@@ -181,6 +249,10 @@ class Model:
             current_day,
             clock_hour,
             current_hour,
+            age,
+            adult,
+            news2,
+            admission_prob, 
             source_of_referral,
             mode_of_arrival, 
             acuity)
@@ -195,10 +267,13 @@ class Model:
             "Clock Hour of Arrival": clock_hour,
             "Hour of Arrival": current_hour,
             "Mode of Arrival": mode_of_arrival,
+            "Patient Age": age,
+            "Adult": adult,
+            "NEWS2": news2,
+            "Admission Probability": admission_prob ,
             "Source of Referral": source_of_referral,
             "Acuity": acuity,
             
-
             # --- Triage-Related Metrics ---
             "Queue Length Walk in Triage Nurse": np.nan,
             "Queue Length Ambulance Triage Nurse": np.nan,
@@ -214,7 +289,6 @@ class Model:
             "Arrival to ED Assessment": np.nan,
             "ED Assessment Service Time": np.nan,
             "ED Assessment to Decision": np.nan,
-
 
             # --- Referral to Medicine ---
             "Arrival to Referral": np.nan,

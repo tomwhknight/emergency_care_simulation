@@ -1,8 +1,8 @@
 measure,mean_value
-Arrival to Triage Nurse Assessment,4.377416066439384
-Arrival to ED Assessment,87.18407983770196
-Arrival to Referral,237.09024245129186
-Arrival to Medical Assessment,5.327494619732925
-Arrival to Consultant Assessment,342.1501576125979
->4hr breach,0.3076923076923077
->12hr breach,0.014245014245014245
+Arrival to Triage Nurse Assessment,2.5375731919824243
+Arrival to ED Assessment,83.45952813400645
+Arrival to Referral,261.19741754051927
+Arrival to Medical Assessment,20.561010117315085
+Arrival to Consultant Assessment,344.27547516715373
+>4hr breach,0.2773109243697479
+>12hr breach,0.028011204481792718
