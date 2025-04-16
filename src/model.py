@@ -39,9 +39,6 @@ class Model:
         self.consultant_time_distribution = Lognormal(mean=self.global_params.mean_consultant_assessment_time, 
                                                    stdev=self.global_params.stdev_consultant_assessment_time)
         
-        self.sdec_time_distribution = Lognormal(mean=self.global_params.mean_sdec_assessment_time, 
-                                                   stdev=self.global_params.stdev_sdec_assessment_time)
-        
         # Create results DF
 
         # Define standard columns, structured by category
@@ -70,6 +67,8 @@ class Model:
             "Triage Nurse Assessment Service Time",
 
             # --- SDEC Referral Information ---
+
+            "SDEC Appropriate",
             "SDEC Accepted",
             "SDEC Decision Reason",
 
@@ -190,10 +189,6 @@ class Model:
 
             # Determine if patient is adult
             adult = age >= 17  # You can adjust threshold if needed
-
-            print(age)
-            print(adult)
-            print(news2)
            
 
             # Determine group label based on patient age and NEWS2
@@ -242,6 +237,15 @@ class Model:
                 ]
             )[0]
 
+            # SDEC appropriate
+
+            if adult:
+                sdec_threshold = self.global_params.sdec_threshold  # e.g. 0.6
+                sdec_appropriate_prob = max(0, 1 - admission_prob)
+                sdec_appropriate = random.random() < (sdec_appropriate_prob * sdec_threshold)
+            else:
+                sdec_appropriate = np.nan
+
             # Create instance of patient class
             patient = Patient(
             self.patient_counter,
@@ -249,13 +253,14 @@ class Model:
             current_day,
             clock_hour,
             current_hour,
+            source_of_referral,
+            mode_of_arrival,
             age,
             adult,
             news2,
             admission_prob, 
-            source_of_referral,
-            mode_of_arrival, 
-            acuity)
+            acuity,
+            sdec_appropriate)
 
             # Initialise a dictionary of patient results 
 
@@ -273,7 +278,8 @@ class Model:
             "Admission Probability": admission_prob ,
             "Source of Referral": source_of_referral,
             "Acuity": acuity,
-            
+
+    
             # --- Triage-Related Metrics ---
             "Queue Length Walk in Triage Nurse": np.nan,
             "Queue Length Ambulance Triage Nurse": np.nan,
@@ -281,7 +287,8 @@ class Model:
             "Triage Nurse Assessment Service Time": np.nan,
 
             # --- SDEC Referral ---
-            "SDEC Accepted": "",
+            "SDEC Appropriate": sdec_appropriate,
+            "SDEC Accepted": np.nan,
             "SDEC Decision Reason": "",
 
             # --- ED Assessment Metrics ---
@@ -626,6 +633,20 @@ class Model:
     def refer_to_sdec(self, patient, fallback_process):
         """Simulate process of referral to SDEC"""
 
+        print(f"[{self.env.now:.2f}] Checking SDEC referral for patient {patient.id}, adult = {patient.adult}") 
+        if not patient.adult:
+            self.record_result(patient.id, "SDEC Accepted", np.nan)
+            self.record_result(patient.id, "SDEC Decision Reason", "Rejected: Paediatric")
+            yield self.env.process(fallback_process(patient))
+            return
+        
+        # Check Acuity
+        if not patient.sdec_appropriate:
+            self.record_result(patient.id, "SDEC Accepted", False)
+            self.record_result(patient.id, "SDEC Decision Reason", "Rejected: Not Appropriate")
+            yield self.env.process(fallback_process(patient))  # Route to fallback
+            return
+        
         # Check if SDEC is open
         current_hour = extract_hour(self.env.now)
         if current_hour < self.global_params.sdec_open_hour or current_hour >= self.global_params.sdec_close_hour:
@@ -633,13 +654,6 @@ class Model:
             self.record_result(patient.id, "SDEC Decision Reason", "Rejected: SDEC Closed")
             yield self.env.process(fallback_process(patient)) # Route to the fallback process
             return  # Route to the fallback process
-        
-        # Check Acuity
-        if patient.acuity in [1, 2, 3]:  # Example eligibility criterion
-            self.record_result(patient.id, "SDEC Accepted", False)
-            self.record_result(patient.id, "SDEC Decision Reason", "Rejected: High Acuity")
-            yield self.env.process(fallback_process(patient))  # Route to the fallback process
-            return
 
         # Check capacity
         if len(self.sdec_capacity.items) > 0:
@@ -708,12 +722,9 @@ class Model:
             self.record_result(patient.id, "Triage Nurse Assessment Service Time", triage_nurse_assessment_time)
             patient.triage_nurse_assessment_time = triage_nurse_assessment_time 
 
-            # All Ambulance transfers excluded from SDEC
-            self.record_result(patient.id, "SDEC Accepted", False)
-            self.record_result(patient.id, "SDEC Decision Reason", "Rejected: Ambulance")
 
          # After triage, proceed ED assessment
-        yield self.env.process(self.ed_assessment(patient))
+        yield self.env.process(self.refer_to_sdec(patient, fallback_process = self.ed_assessment))
 
     # Simulate ED assessment process
 
@@ -1009,6 +1020,8 @@ class Model:
             'Arrival to Referral': ['mean'],
             'Arrival to Medical Assessment': ['mean'],
             'Arrival to Consultant Assessment': ['mean'],
+            'SDEC Appropriate': ['mean'],
+            'SDEC Accepted': ['mean'],  
             '>4hr breach': ['mean'],
             '>12hr breach': ['mean'],
             # Add additional measures as necessary
@@ -1017,7 +1030,7 @@ class Model:
         # Rename columns for clarity
         hourly_data.columns = ['hour_of_arrival', 'mean_arrival_triage', 'mean_arrival_ed',
                            'mean_arrival_referral', 'arrival_medical_assessment',
-                           'mean_arrival_consultant_assessment', '>4hr breach', '>12hr breach']
+                           'mean_arrival_consultant_assessment', 'prop_sdec_appropriate', 'prop_sdec_accepted', 'prop_>4hr_breach', 'prop_>12hr_breach']
 
         # Aggregate by Day
         daily_data = copy.groupby(['Day of Arrival']).agg({
@@ -1026,15 +1039,16 @@ class Model:
             'Arrival to Referral': ['mean'],
             'Arrival to Medical Assessment': ['mean'],
             'Arrival to Consultant Assessment': ['mean'],
+            'SDEC Appropriate': ['mean'],
+            'SDEC Accepted': ['mean'],  
             '>4hr breach': ['mean'],
             '>12hr breach': ['mean'],
-            # Add additional measures as necessary
         }).reset_index()
 
         # Rename columns for clarity
         daily_data.columns = ['day_of_arrival', 'mean_arrival_triage', 'mean_arrival_ed',
                            'mean_arrival_referral', 'arrival_medical_assessment',
-                           'mean_arrival_consultant_assessment', '>4hr breach', '>12hr breach']
+                           'mean_arrival_consultant_assessment', 'sdec_appopriate', 'prop_sdec_accepted', 'prop_>4hr_breach', 'prop_>12hr_breach']
 
         # Now, aggregate across all runs
         complete_data = copy.agg({
@@ -1043,6 +1057,8 @@ class Model:
             'Arrival to Referral': ['mean'],
             'Arrival to Medical Assessment': ['mean'],
             'Arrival to Consultant Assessment': ['mean'],
+            'SDEC Appropriate': ['mean'],
+            'SDEC Accepted': ['mean'],  
             '>4hr breach': ['mean'],
             '>12hr breach': ['mean'],
         }).T.reset_index()

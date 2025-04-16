@@ -9,16 +9,20 @@ class GlobalParameters:
                  proportion_direct_primary_care,
                  ambulance_acuity_probabilities, 
                  walk_in_acuity_probabilities,
+                 sdec_threshold,
+
                  ambulance_triage_nurse_capacity,
                  walk_in_triage_nurse_capacity,  
                  ed_doctor_capacity, 
                  medical_doctor_capacity, 
                  consultant_capacity, 
-                 mean_sdec_capacity_release_interval, 
+                 
                  sdec_open_hour, 
                  sdec_close_hour,
+                 
                  weekday_sdec_base_capacity, 
                  weekend_sdec_base_capacity, 
+                 
                  max_sdec_capacity, 
                  max_amu_available_beds,
 
@@ -46,9 +50,6 @@ class GlobalParameters:
           
                  mean_consultant_assessment_time,
                  stdev_consultant_assessment_time, 
-                 mean_sdec_assessment_time,
-                 stdev_sdec_assessment_time,
-                 
                  
                  burn_in_time,
                  simulation_time):
@@ -80,6 +81,8 @@ class GlobalParameters:
         # Source of referral 
         self.proportion_direct_primary_care = proportion_direct_primary_care
 
+        self.sdec_threshold = sdec_threshold
+
         # ED disposition probabilities
         self.ed_discharge_prob = ed_discharge_prob
         self.ed_medicine_referral_prob = ed_medicine_referral_prob
@@ -101,8 +104,7 @@ class GlobalParameters:
         # Define store values 
         self.max_amu_available_beds = max_amu_available_beds # refers max available to transfer at any point (not total AMU capacity)
         self.max_sdec_capacity = max_sdec_capacity # refers max available to transfer at any point (not total SDEC capacity)
-        self.mean_sdec_capacity_release_interval = mean_sdec_capacity_release_interval # refers to rate at which sdec slots open to ED referrals in the day
-
+      
         self.sdec_open_hour = sdec_open_hour   # SDEC opens at 08:00
         self.sdec_close_hour = sdec_close_hour # SDEC stops accepting referrals at 18:00
 
@@ -127,9 +129,6 @@ class GlobalParameters:
         
         self.mean_consultant_assessment_time = mean_consultant_assessment_time
         self.stdev_consultant_assessment_time = stdev_consultant_assessment_time 
-
-        self.mean_sdec_assessment_time = mean_sdec_assessment_time
-        self.stdev_sdec_assessment_time = stdev_sdec_assessment_time
 
         # Sim duration
         self.burn_in_time = burn_in_time

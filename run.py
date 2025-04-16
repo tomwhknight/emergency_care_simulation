@@ -30,6 +30,10 @@ if __name__ == "__main__":
         5: 0.20,
         },  
 
+        # Patient characteristic variables
+
+        sdec_threshold = 0.60,
+
         # Staffing resource
         ambulance_triage_nurse_capacity = 1,
         walk_in_triage_nurse_capacity = 2,
@@ -71,15 +75,10 @@ if __name__ == "__main__":
 
         mean_consultant_assessment_time = 25,
         stdev_consultant_assessment_time = 10, 
-
-        mean_sdec_assessment_time = 480,
-        stdev_sdec_assessment_time = 60,
        
         initial_medicine_discharge_prob = 0.1,
         consultant_discharge_prob = 0.3,
-          
-        mean_sdec_capacity_release_interval = 30,
-    
+        
         simulation_time = 2880,
         burn_in_time = 1440) # burn in to prevent initiation bias
         
