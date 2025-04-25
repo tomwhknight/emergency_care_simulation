@@ -1028,6 +1028,9 @@ class Model:
 
         # Make a copy
         copy = self.run_results_df.copy()
+        total_attendances = len(copy)
+        simulation_days = (self.global_params.simulation_time - self.global_params.burn_in_time) / 1440
+        attendances_per_day = total_attendances / simulation_days
 
         # Aggregate by Hour
         hourly_data = copy.groupby(['Hour of Arrival']).agg({
@@ -1035,9 +1038,10 @@ class Model:
             'Arrival to ED Assessment': ['mean'],
             'Arrival to Referral': ['mean'],
             'Arrival to Medical Assessment': ['mean'],
-            'Arrival to Consultant Assessment': ['mean'],
+            'Arrival to Consultant Assessment': ['mean'], 
             'SDEC Appropriate': ['mean'],
-            'SDEC Accepted': ['mean'],  
+            'SDEC Accepted': ['mean'], 
+            'Time in System': ['mean'], 
             '>4hr breach': ['mean'],
             '>12hr breach': ['mean'],
             # Add additional measures as necessary
@@ -1046,7 +1050,7 @@ class Model:
         # Rename columns for clarity
         hourly_data.columns = ['hour_of_arrival', 'mean_arrival_triage', 'mean_arrival_ed',
                            'mean_arrival_referral', 'arrival_medical_assessment',
-                           'mean_arrival_consultant_assessment', 'prop_sdec_appropriate', 'prop_sdec_accepted', 'prop_>4hr_breach', 'prop_>12hr_breach']
+                           'mean_arrival_consultant_assessment', 'prop_sdec_appropriate', 'prop_sdec_accepted',  'time_in_ed',  'prop_>4hr_breach', 'prop_>12hr_breach']
 
         # Aggregate by Day
         daily_data = copy.groupby(['Day of Arrival']).agg({
@@ -1057,6 +1061,7 @@ class Model:
             'Arrival to Consultant Assessment': ['mean'],
             'SDEC Appropriate': ['mean'],
             'SDEC Accepted': ['mean'],  
+            'Time in System': ['mean'],  
             '>4hr breach': ['mean'],
             '>12hr breach': ['mean'],
         }).reset_index()
@@ -1064,31 +1069,55 @@ class Model:
         # Rename columns for clarity
         daily_data.columns = ['day_of_arrival', 'mean_arrival_triage', 'mean_arrival_ed',
                            'mean_arrival_referral', 'arrival_medical_assessment',
-                           'mean_arrival_consultant_assessment', 'sdec_appopriate', 'prop_sdec_accepted', 'prop_>4hr_breach', 'prop_>12hr_breach']
+                           'mean_arrival_consultant_assessment', 'sdec_appopriate', 'prop_sdec_accepted', 'time_in_ed', 'prop_>4hr_breach', 'prop_>12hr_breach']
 
         # Now, aggregate across all runs
         complete_data = copy.agg({
-               'Arrival to Triage Nurse Assessment': ['mean'],
+            'Arrival to Triage Nurse Assessment': ['mean'],
             'Arrival to ED Assessment': ['mean'],
             'Arrival to Referral': ['mean'],
             'Arrival to Medical Assessment': ['mean'],
             'Arrival to Consultant Assessment': ['mean'],
             'SDEC Appropriate': ['mean'],
-            'SDEC Accepted': ['mean'],  
+            'SDEC Accepted': ['mean'],
+            'Time in System': ['mean'],  
             '>4hr breach': ['mean'],
             '>12hr breach': ['mean'],
         }).T.reset_index()
 
         complete_data.columns = ['measure', 'mean_value']
 
+        # Append attendances per day as summary row
+        attendance_row = pd.DataFrame([["Mean ED Attendances per Day", attendances_per_day]], columns=["measure", "mean_value"])
+        complete_data = pd.concat([complete_data, attendance_row], ignore_index=True)
+
         # Add proportion referred to Medicine
         prop_medicine = copy['ED Disposition'].value_counts(normalize=True).get("Refer - Medicine", 0)
         complete_data.loc[len(complete_data.index)] = ['Proportion Referred - Medicine', prop_medicine]
 
+         # Add SDEC appropriate
+        sdec_appropriate = copy[copy["SDEC Appropriate"] == True]
+        if len(sdec_appropriate) > 0:
+                prop_sdec_accepted_among_appropriate = sdec_appropriate["SDEC Accepted"].mean()
+        else:
+            prop_sdec_accepted_among_appropriate = None  # or np.nan
+
+        sdec_row = pd.DataFrame(
+            [["SDEC Accepted (of Appropriate)", prop_sdec_accepted_among_appropriate]],
+            columns=["measure", "mean_value"]
+            )
+        complete_data = pd.concat([complete_data, sdec_row], ignore_index=True)
+
 
         # Store the aggregated results
+        
+        hourly_data["run_number"] = self.run_number
         self.results_hourly = hourly_data
+        
+        daily_data["run_number"] = self.run_number
         self.results_daily = daily_data
+        
+        complete_data["run_number"] = self.run_number
         self.results_complete = complete_data
 
         return hourly_data, daily_data, complete_data

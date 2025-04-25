@@ -1,2 +1,2 @@
-day_of_arrival,mean_arrival_triage,mean_arrival_ed,mean_arrival_referral,arrival_medical_assessment,mean_arrival_consultant_assessment,sdec_appopriate,prop_sdec_accepted,prop_>4hr_breach,prop_>12hr_breach
-Mon,18.168499247080813,95.48971757318539,257.48335972000154,19.737618850961198,375.65411229423626,0.24390243902439024,0.08013937282229965,0.31151832460732987,0.002617801047120419
+day_of_arrival,mean_arrival_triage,mean_arrival_ed,mean_arrival_referral,arrival_medical_assessment,mean_arrival_consultant_assessment,sdec_appopriate,prop_sdec_accepted,time_in_ed,prop_>4hr_breach,prop_>12hr_breach,run_number
+Tue,4.749920748721033,113.90428769793574,282.5928847403106,77.39644212665529,1160.4946334009546,0.23793103448275862,0.017241379310344827,282.5176435655048,0.3064516129032258,0.016129032258064516,5

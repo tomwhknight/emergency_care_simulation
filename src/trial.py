@@ -21,7 +21,7 @@ class Trial:
         self.agg_amu_queue_df = pd.DataFrame()  # Initialize an empty DataFrame for AMU queue monitoring results
 
 
-    def run(self, run_number):
+    def run(self, run_number, progress_bar=None):
         """Run the trial for the specified number of runs."""
         burn_in_time = self.global_params.burn_in_time
 
@@ -50,6 +50,28 @@ class Trial:
             self.agg_results_hourly = pd.concat([self.agg_results_hourly, hourly_data], ignore_index=True) # Hourly 
             self.agg_results_daily = pd.concat([self.agg_results_daily, daily_data], ignore_index=True) # Daily
             self.agg_results_complete = pd.concat([self.agg_results_complete, complete_data], ignore_index=True) # Complete
+            
+           
+            # Create overall mean across runs
+            self.overall_summary = (
+                self.agg_results_complete.groupby("measure", as_index=False)
+                .agg(mean_overall=("mean_value", "mean"))
+            )
+            # Define proportion-based metrics (already multiplied by 100 earlier in outcome_measures)
+            proportion_metrics = [
+                "SDEC Appropriate",
+                "SDEC Accepted",
+                "SDEC Accepted (of Appropriate)",
+                ">4hr breach",
+                ">12hr breach",
+                "Proportion Referred - Medicine"
+            ]
+
+            # Round selectively
+            self.overall_summary["mean_overall"] = self.overall_summary.apply(
+                lambda row: round(row["mean_overall"] * 100, 2) if row["measure"] in proportion_metrics else round(row["mean_overall"], 1),
+                axis=1
+            )
 
             # Add the 'Run Number' column to the consultant monitoring DataFrame
             model.consultant_queue_monitoring_df["Run Number"] = i + 1
@@ -60,13 +82,16 @@ class Trial:
             # Concatenate the AMU queue results of each run to the global results DataFrame for AMU queue data
             self.agg_amu_queue_df = pd.concat([self.agg_amu_queue_df, model.amu_queue_df], ignore_index=True)
 
+            if progress_bar:
+                percent = int((i + 1) / run_number * 100)
+                progress_bar.progress(percent, text=f"Running simulation... {percent}%")
+
         # Move 'Run Number' to the first column for cleaner presentation
         cols = ["Run Number"] + [col for col in self.agg_results_df.columns if col != "Run Number"]
         self.agg_results_df = self.agg_results_df[cols]
         # Ensure the directory 'results' exists
         if not os.path.exists('results'):
             os.makedirs('results')
-
 
         # Save patient-level results
         patient_result_path = os.path.join('data', 'results', 'results.csv')
@@ -83,10 +108,12 @@ class Trial:
         daily_data.to_csv(daily_result_path, index=False)
         print(f"Daily results saved to {daily_result_path}")
 
-        # Save complete results
-        complete_result_path = os.path.join('data', 'results', 'summary_results_complete.csv')
-        complete_data.to_csv(complete_result_path, index=False)
-        print(f"Complete results saved to {complete_result_path}")
+    
+         # Save aggegarted complete results
+        overall_summary_path = os.path.join('data', 'results', 'overall_summary.csv')
+        self.overall_summary.to_csv(overall_summary_path , index=False)
+        print(f"Aggregated summary results saved to {overall_summary_path }")
+
 
         # Save queue monitoring results
         consultant_queue_result_path = os.path.join('data', 'results', 'consultant_queue_monitoring_results.csv')

@@ -1,0 +1,12 @@
+measure,mean_overall
+>12hr breach,0.0
+>4hr breach,0.3
+Arrival to Consultant Assessment,324.6
+Arrival to ED Assessment,73.7
+Arrival to Medical Assessment,8.9
+Arrival to Referral,242.7
+Arrival to Triage Nurse Assessment,8.5
+Mean ED Attendances per Day,369.8
+Proportion Referred - Medicine,0.1
+SDEC Accepted,0.1
+SDEC Appropriate,0.3

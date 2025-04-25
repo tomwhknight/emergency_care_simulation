@@ -33,7 +33,7 @@ if __name__ == "__main__":
         # Patient characteristic variables
 
         sdec_threshold = 0.60,
-        ed_threshold = .5,
+        ed_threshold = 0.5,
 
         # Staffing resource
         ambulance_triage_nurse_capacity = 1,
@@ -76,9 +76,9 @@ if __name__ == "__main__":
         initial_medicine_discharge_prob = 0.1,
         consultant_discharge_prob = 0.3,
         
-        simulation_time = 1440,
-        burn_in_time = 0) # burn in to prevent initiation bias
+        simulation_time = 4320,
+        burn_in_time = 1440) # burn in to prevent initiation bias
         
     trial = Trial(global_params)
-    total_runs = 2
+    total_runs = 20
     trial.run(total_runs)
