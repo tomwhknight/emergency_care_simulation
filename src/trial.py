@@ -108,8 +108,8 @@ class Trial:
         daily_data.to_csv(daily_result_path, index=False)
         print(f"Daily results saved to {daily_result_path}")
 
-    
-         # Save aggegarted complete results
+
+        # Save aggegarted complete results
         overall_summary_path = os.path.join('data', 'results', 'overall_summary.csv')
         self.overall_summary.to_csv(overall_summary_path , index=False)
         print(f"Aggregated summary results saved to {overall_summary_path }")

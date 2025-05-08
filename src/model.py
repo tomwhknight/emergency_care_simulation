@@ -1104,8 +1104,9 @@ class Model:
 
         sdec_row = pd.DataFrame(
             [["SDEC Accepted (of Appropriate)", prop_sdec_accepted_among_appropriate]],
-            columns=["measure", "mean_value"]
+                columns=["measure", "mean_value"]
             )
+        
         complete_data = pd.concat([complete_data, sdec_row], ignore_index=True)
 
 

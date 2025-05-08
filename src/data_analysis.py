@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import os
 
 # Define the path to the CSV file
-csv_path = '/Users/thomasknight/Desktop/ACL/Projects/emergency_care_simulation/data/results/results.csv'
+csv_path = '/Users/thomasknight/Desktop/ACL/Projects/emergency_care_simulation/documentation/process_map.jpeg'
 
 def load_data(csv_path, burn_in_time=1440):
     """
