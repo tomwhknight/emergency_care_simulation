@@ -30,11 +30,6 @@ class Model:
         self.triage_time_distribution = Lognormal(mean=self.global_params.mean_triage_assessment_time,
                                                   stdev=self.global_params.stdev_triage_assessment_time)
         
-        self.ed_assessment_time_distribution = Lognormal(mean=self.global_params.mean_ed_assessment_time,
-                                                  stdev=self.global_params.stdev_ed_assessment_time)
-        
-        self.medical_assessment_time_distribution = Lognormal(mean=self.global_params.mean_initial_medical_assessment_time,
-                                                  stdev=self.global_params.stdev_initial_medical_assessment_time)
         
         self.consultant_time_distribution = Lognormal(mean=self.global_params.mean_consultant_assessment_time, 
                                                    stdev=self.global_params.stdev_consultant_assessment_time)
@@ -77,6 +72,7 @@ class Model:
 
             "Queue Length ED doctor",
             "Arrival to ED Assessment",
+            "ED Assessment Time Total",
             "ED Assessment Service Time",
             "ED Assessment to Decision",
     
@@ -191,7 +187,6 @@ class Model:
             # Determine if patient is adult
             adult = age >= 17  # You can adjust threshold if needed
            
-
             # Determine group label based on patient age and NEWS2
             if not adult:
                 group = "under_17"
@@ -241,7 +236,7 @@ class Model:
             # SDEC appropriate
 
             if adult:
-                sdec_threshold = self.global_params.sdec_threshold  # e.g. 0.6
+                sdec_threshold = self.global_params.sdec_threshold  
                 sdec_appropriate_prob = max(0, 1 - admission_prob)
                 sdec_appropriate = random.random() < (sdec_appropriate_prob * sdec_threshold)
             else:
@@ -272,6 +267,13 @@ class Model:
                         k=1
                     )[0]
 
+            # --- Determine priority level ---
+            if acuity in [1, 2] or news2 > 4:
+                priority = 0  # Higher priority
+            else:
+                priority = 1  # Lower priority
+
+
             # Create instance of patient class
             
             patient = Patient(
@@ -288,7 +290,8 @@ class Model:
             admission_prob, 
             acuity,
             sdec_appropriate,
-            ed_disposition
+            ed_disposition,
+            priority
             )
 
             # Initialise a dictionary of patient results 
@@ -324,6 +327,7 @@ class Model:
             # --- ED Assessment Metrics ---
             "Queue Length ED doctor": np.nan,
             "Arrival to ED Assessment": np.nan,
+            "ED Assessment Time Total": np.nan,
             "ED Assessment Service Time": np.nan,
             "ED Assessment to Decision": np.nan,
 
@@ -759,81 +763,77 @@ class Model:
 
     def ed_assessment(self, patient):
         """Simulate ED assessment."""
-        print(f"ED Doctor Queue at time of request: {len(self.ed_doctor.queue)} patients at time {self.env.now}")
-        self.record_result(patient.id, "Queue Length ED doctor", len(self.ed_doctor.queue))
-
-        # Determine priority level locally based on acuity
-        if patient.acuity in [1, 2]:
-            priority_level = 0
-        else:
-            priority_level = 1
-
-        # Request the ED doctor resource
-        with self.ed_doctor.request(priority = priority_level) as req:
-            yield req  # Wait until a doctor is available
-            ed_assessment_start_time = self.env.now
-            ed_doctor_wait_time = ed_assessment_start_time - patient.arrival_time
-            print(f"Patient {patient.id} starts ED assessment at {ed_assessment_start_time}")
-            self.record_result(patient.id, "Arrival to ED Assessment", ed_doctor_wait_time)
-       
-            # Sample from the triage nurse assessment distribution 
-            ed_assessment_time = self.ed_assessment_time_distribution.sample()
-            yield self.env.timeout(ed_assessment_time)
-            print(f"Patient {patient.id} spends {ed_assessment_time} minutes with ED doctor")
+        with self.ed_doctor.request(priority=patient.priority) as req:
+            print(f"ED Doctor Queue at time of request: {len(self.ed_doctor.queue)} patients at time {self.env.now}")
+            self.record_result(patient.id, "Queue Length ED doctor", len(self.ed_doctor.queue))
+            yield req
             
-            # Record ed assessment time in the results # 
-            self.record_result(patient.id, "ED Assessment Service Time", ed_assessment_time)
-            patient.ed_assessment_time = ed_assessment_time
+            # Assessment starts once doctor is available
+            ed_assessment_start_time = self.env.now
+            wait_time = ed_assessment_start_time - patient.arrival_time
+            self.record_result(patient.id, "Arrival to ED Assessment", wait_time)
+            print(f"Patient {patient.id} starts ED assessment at {ed_assessment_start_time}")
+          
+            # Sample total assessment time based on disposition
+            if patient.ed_disposition == "Discharge":
+                total_ed_assessment_time = np.random.lognormal(
+                    mean=self.global_params.mu_ed_assessment_discharge,
+                    sigma=self.global_params.sigma_ed_assessment_discharge
+                )
+            elif patient.ed_disposition in ["Refer - Medicine", "Refer - Speciality", "Refer - Paeds"]:
+                total_ed_assessment_time = (
+                    np.random.weibull(self.global_params.wb_shape_ed_assessment_admit) *
+                    self.global_params.wb_scale_ed_assessment_admit
+                )
 
+             # Sample how long doctor is needed (can’t exceed total time)
+            ed_service_time = min(
+                np.random.lognormal(
+                    mean=self.global_params.mu_ed_service_time,
+                    sigma=self.global_params.sigma_ed_service_time
+                ),
+                total_ed_assessment_time
+            )
+
+            # Doctor is held only for service time
+            yield self.env.timeout(ed_service_time)
+            self.record_result(patient.id, "ED Doctor Service Time", ed_service_time)
+
+        remaining_time = total_ed_assessment_time - ed_service_time
+        if remaining_time > 0:
+            yield self.env.timeout(remaining_time)
+
+        print(f"Patient {patient.id} spends {total_ed_assessment_time:.1f} minutes being assessed in ED")
+        self.record_result(patient.id, "ED Assessment Time Total", total_ed_assessment_time)
+
+        # Routing logic
         ed_outcome = patient.ed_disposition
         print(f"Patient {patient.id} ED outcome (predefined): {ed_outcome}")
 
-        # Route accordingly
         if ed_outcome == "Discharge":
-            decision_delay_discharge = np.random.lognormal(
-                mean = self.global_params.mu_ed_delay_time_discharge, 
-                sigma = self.global_params.sigma_ed_delay_time_discharge)
-            yield self.env.timeout(decision_delay_discharge)       
             patient.discharge_time = self.env.now
             time_in_system = patient.discharge_time - patient.arrival_time
-            self.record_result(patient.id, "ED Assessment to Decision", decision_delay_discharge)
-            print(f"Patient {patient.id} Discharged {decision_delay_discharge} after ED assessment")
             self.record_result(patient.id, "Discharge Decision Point", "ed_discharge")
             self.record_result(patient.id, "Time in System", time_in_system)
             print(f"Patient {patient.id} discharged from ED at {patient.discharge_time}")
             return
 
         elif ed_outcome == "Refer - Speciality":
-            decision_delay_admission = np.random.lognormal(
-                mean = self.global_params.mu_ed_delay_time_admission, 
-                sigma = self.global_params.sigma_ed_delay_time_admission
-                )
-            yield self.env.timeout(decision_delay_admission)
             pseudo_departure_time = self.env.now
             time_in_system = pseudo_departure_time - patient.arrival_time
-            print(f"Patient {patient.id} Referred - Speciality {decision_delay_admission} after ED assessment")
-            self.record_result(patient.id, "ED Assessment to Decision", decision_delay_admission)
-            self.record_result(patient.id, "Time in System", time_in_system)
             self.record_result(patient.id, "Discharge Decision Point", "ed_referred_other_specialty_pseudo_exit")
+            self.record_result(patient.id, "Time in System", time_in_system)
+            print(f"Patient {patient.id} referred to other specialty at {pseudo_departure_time}")
             return
 
         elif ed_outcome == "Refer - Medicine":
-            decision_delay_admission = np.random.lognormal(
-                mean = self.global_params.mu_ed_delay_time_admission, 
-                sigma = self.global_params.sigma_ed_delay_time_admission
-                )
-            yield self.env.timeout(decision_delay_admission)
             patient.referral_to_medicine_time = self.env.now
-            self.record_result(patient.id, "ED Assessment to Decision", decision_delay_admission)
-            print(f"Patient {patient.id} referred to Medicine {decision_delay_admission} after ED assessment")
-  
-            # Record total time from arrival to referral    
             total_time_referral = self.env.now - patient.arrival_time
             self.record_result(patient.id, "Arrival to Referral", total_time_referral)
-                
-            # Pass on to downstream Medicine pathway
+            print(f"Patient {patient.id} referred to medicine at {patient.referral_to_medicine_time}")
             yield self.env.process(self.handle_ed_referral(patient))
             
+
     def handle_ed_referral(self, patient):
         """Handles referral after ED assessment when SDEC is rejected.
         Ensures patient is referred to AMU queue while also starting medical assessment."""
@@ -902,8 +902,13 @@ class Model:
             self.record_result(patient.id, "Arrival to Medical Assessment", wait_for_medical)
             print(f"{end_medical_q:.2f}: Medical doctor starts assessing Patient {patient.id}.")
 
+    
             # Sample the medical assessment time from a specified distribution
-            med_assessment_time = random.expovariate(1.0 / self.global_params.mean_initial_medical_assessment_time)
+            med_assessment_time = np.random.gamma(
+                    shape =self.global_params.gamma_shape_medical_assessment,
+                    scale =self.global_params.gamma_scale_medical_assessment)
+            
+            
             yield self.env.timeout(med_assessment_time)
             print(f"Patient {patient.id} spends {med_assessment_time} minutes with medical doctor")
             

@@ -57,18 +57,18 @@ if __name__ == "__main__":
         # Service times
         mean_triage_assessment_time = 5,
         stdev_triage_assessment_time = 2,
-        
-        mean_ed_assessment_time = 60,
-        stdev_ed_assessment_time = 30,
+    
+        mu_ed_assessment_discharge = 4.2, 
+        sigma_ed_assessment_discharge = 1.0, 
 
-        mu_ed_delay_time_discharge = 4.5,
-        sigma_ed_delay_time_discharge = 1.0,
+        wb_shape_ed_assessment_admit = 1.6,
+        wb_scale_ed_assessment_admit = 1/0.01,
 
-        mu_ed_delay_time_admission = 4.6,
-        sigma_ed_delay_time_admission = 1.2,
+        mu_ed_service_time = 3.4, 
+        sigma_ed_service_time = 1.0, 
 
-        mean_initial_medical_assessment_time = 60,
-        stdev_initial_medical_assessment_time = 30, 
+        gamma_shape_medical_assessment = 1.6,
+        gamma_scale_medical_assessment = 1/0.01, 
 
         mean_consultant_assessment_time = 25,
         stdev_consultant_assessment_time = 10, 

@@ -18,12 +18,12 @@ class Patient:
         self.acuity = acuity 
         self.sdec_appropriate = sdec_appropriate
         self.ed_disposition = ed_disposition
+        self.priority = priority
 
         # Track outcomes
         
         self.transferred_to_amu = False
         self.transferred_to_sdec = False
-
         
         # Record disporition 
         self.discharged = False

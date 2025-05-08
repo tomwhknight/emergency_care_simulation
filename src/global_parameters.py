@@ -30,17 +30,17 @@ class GlobalParameters:
                  mean_triage_assessment_time, 
                  stdev_triage_assessment_time,
                  
-                 mean_ed_assessment_time,
-                 stdev_ed_assessment_time, 
-                 
-                 mean_initial_medical_assessment_time,
-                 stdev_initial_medical_assessment_time, 
+                 mu_ed_assessment_discharge,
+                 sigma_ed_assessment_discharge,
 
-                 mu_ed_delay_time_discharge,
-                 sigma_ed_delay_time_discharge,
+                 wb_shape_ed_assessment_admit,
+                 wb_scale_ed_assessment_admit,
 
-                 mu_ed_delay_time_admission, 
-                 sigma_ed_delay_time_admission, 
+                 mu_ed_service_time, 
+                 sigma_ed_service_time, 
+
+                 gamma_shape_medical_assessment,
+                 gamma_scale_medical_assessment,
 
                  initial_medicine_discharge_prob,
                  consultant_discharge_prob,
@@ -83,7 +83,6 @@ class GlobalParameters:
         self.sdec_threshold = sdec_threshold
         self.ed_threshold = ed_threshold
 
-
         # Medicine discharge probabilities
 
         self.initial_medicine_discharge_prob = initial_medicine_discharge_prob
@@ -111,17 +110,17 @@ class GlobalParameters:
         self.mean_triage_assessment_time = mean_triage_assessment_time 
         self.stdev_triage_assessment_time = stdev_triage_assessment_time
 
-        self.mean_ed_assessment_time = mean_ed_assessment_time
-        self.stdev_ed_assessment_time = stdev_ed_assessment_time
+        self.mu_ed_assessment_discharge = mu_ed_assessment_discharge
+        self.sigma_ed_assessment_discharge = sigma_ed_assessment_discharge
 
-        self.mu_ed_delay_time_discharge = mu_ed_delay_time_discharge
-        self.sigma_ed_delay_time_discharge = sigma_ed_delay_time_discharge
+        self.wb_shape_ed_assessment_admit = wb_shape_ed_assessment_admit
+        self.wb_scale_ed_assessment_admit = wb_scale_ed_assessment_admit
 
-        self.mu_ed_delay_time_admission = mu_ed_delay_time_admission
-        self.sigma_ed_delay_time_admission = sigma_ed_delay_time_admission
-
-        self.mean_initial_medical_assessment_time = mean_initial_medical_assessment_time
-        self.stdev_initial_medical_assessment_time = stdev_initial_medical_assessment_time
+        self.mu_ed_service_time = mu_ed_service_time
+        self.sigma_ed_service_time = sigma_ed_service_time
+     
+        self.gamma_shape_medical_assessment = gamma_shape_medical_assessment
+        self.gamma_scale_medical_assessment= gamma_scale_medical_assessment
         
         self.mean_consultant_assessment_time = mean_consultant_assessment_time
         self.stdev_consultant_assessment_time = stdev_consultant_assessment_time 
