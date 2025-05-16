@@ -34,6 +34,11 @@ class Model:
         self.consultant_time_distribution = Lognormal(mean=self.global_params.mean_consultant_assessment_time, 
                                                    stdev=self.global_params.stdev_consultant_assessment_time)
         
+
+        # Stochastic arriavl rate 
+
+        self.daily_referral_rates = {}
+
         # Create results DF
 
         # Define standard columns, structured by category
@@ -140,7 +145,12 @@ class Model:
         """Generate patient arrivals based on inter-arrival times."""
     
         while True:
-            self.patient_counter += 1  # Shared counter across generators
+            if self.env.now > self.burn_in_time:
+                self.patient_counter += 1
+                patient_id = self.patient_counter
+            else:
+                patient_id = np.nan
+
             arrival_time = self.env.now
         
             # Add time variables
@@ -157,7 +167,7 @@ class Model:
             age_weights = {}
 
             for age in range(0, 5):
-                age_weights[age] = 2       # Ages 0–4 → weight 2
+                age_weights[age] = 1.75       # Ages 0–4 → weight 1.75
             for age in range(5, 80):
                 age_weights[age] = 1       # Ages 5–79 → weight 1
             for age in range(80, 101):
@@ -185,7 +195,7 @@ class Model:
             news2 = random.choices(news2_values, weights=news2_weights, k=1)[0]
 
             # Determine if patient is adult
-            adult = age >= 17  # You can adjust threshold if needed
+            adult = age >= 17  
            
             # Determine group label based on patient age and NEWS2
             if not adult:
@@ -236,37 +246,29 @@ class Model:
             # SDEC appropriate
 
             if adult:
-                sdec_threshold = self.global_params.sdec_threshold  
-                sdec_appropriate_prob = max(0, 1 - admission_prob)
-                sdec_appropriate = random.random() < (sdec_appropriate_prob * sdec_threshold)
+                sdec_appropriate = random.random() < self.global_params.sdec_appropriate_rate
             else:
                 sdec_appropriate = np.nan
 
-            # ED disposition 
-
+            # Stochastic variation of ED disposition 
+            
             if not adult:
                 ed_disposition = random.choices(
                     ["Discharge", "Refer - Paeds"],
                     weights=[0.9, 0.1],
                     k=1
-                )[0]
+                )[0] 
+
             else:
-
-                if random.random() < 0.05:
-                    ed_disposition = "Refer - Speciality"
-            
+                if random.random() < self.global_params.medical_referral_rate:
+                    ed_disposition = "Refer - Medicine"
                 else:
-                    # Apply tunable policy threshold
-                    threshold = self.global_params.ed_threshold
-                    prob_medicine = min(admission_prob * threshold, 1)
-                    prob_discharge = 1 - prob_medicine
-
-                    ed_disposition = random.choices(
-                        ["Discharge", "Refer - Medicine"],
-                        weights=[prob_discharge, prob_medicine],
-                        k=1
-                    )[0]
-
+                    if random.random() < self.global_params.speciality_referral_rate:
+                        ed_disposition = "Refer - Speciality"
+                    else:
+                        ed_disposition = "Discharge"
+                        
+          
             # --- Determine priority level ---
             if acuity in [1, 2] or news2 > 4:
                 priority = 0  # Higher priority
@@ -378,6 +380,9 @@ class Model:
             self.record_result(patient.id, "Day of Arrival", patient.current_day)
             self.record_result(patient.id, "Clock Hour of Arrival", patient.clock_hour)
             self.record_result(patient.id, "Hour of Arrival", patient.current_hour)
+
+            if patient.ed_disposition == "Refer - Paeds":
+                self.record_result(patient.id, "Discharge Decision Point", "ed_referred_paeds")
             
             # Assign patient to correct triage process
             if mode_of_arrival == "Ambulance":
@@ -601,7 +606,7 @@ class Model:
             print(f"{self.env.now:.2f}: Doctors on shift at hour {current_hour}: {available_doctors}")
 
             # Step 4: Determine how many doctors to send on break (16% of available doctors)
-            num_on_break = max(1, int(0.16 * available_doctors))  # Ensure at least 1 doctor takes a break
+            num_on_break = max(1, int(0.20 * available_doctors))  # Ensure at least 1 doctor takes a break
 
             # Step 5: Randomly select doctors to take a break
             for _ in range(num_on_break):
@@ -776,35 +781,37 @@ class Model:
           
             # Sample total assessment time based on disposition
             if patient.ed_disposition == "Discharge":
-                total_ed_assessment_time = np.random.lognormal(
+                total_ed_assessment_time = max(np.random.lognormal(
                     mean=self.global_params.mu_ed_assessment_discharge,
-                    sigma=self.global_params.sigma_ed_assessment_discharge
-                )
+                    sigma=self.global_params.sigma_ed_assessment_discharge), 
+                    self.global_params.min_ed_service_time)
+                
             elif patient.ed_disposition in ["Refer - Medicine", "Refer - Speciality", "Refer - Paeds"]:
-                total_ed_assessment_time = (
-                    np.random.weibull(self.global_params.wb_shape_ed_assessment_admit) *
-                    self.global_params.wb_scale_ed_assessment_admit
-                )
+                total_ed_assessment_time = max(np.random.weibull(self.global_params.wb_shape_ed_assessment_admit *
+                    self.global_params.wb_scale_ed_assessment_admit), self.global_params.min_ed_service_time)
 
              # Sample how long doctor is needed (can’t exceed total time)
-            ed_service_time = min(
-                np.random.lognormal(
+            raw_service_time = np.random.lognormal(
                     mean=self.global_params.mu_ed_service_time,
                     sigma=self.global_params.sigma_ed_service_time
-                ),
-                total_ed_assessment_time
+                )
+            ed_service_time = min(max(raw_service_time, self.global_params.min_ed_service_time), self.global_params.max_ed_service_time
             )
 
             # Doctor is held only for service time
             yield self.env.timeout(ed_service_time)
-            self.record_result(patient.id, "ED Doctor Service Time", ed_service_time)
+            self.record_result(patient.id, "ED Assessment Service Time", ed_service_time)
 
         remaining_time = total_ed_assessment_time - ed_service_time
         if remaining_time > 0:
             yield self.env.timeout(remaining_time)
+            print(f"Patient {patient.id} spends {total_ed_assessment_time:.1f} minutes being assessed in ED")
+            self.record_result(patient.id, "ED Assessment Time Total", total_ed_assessment_time)
+            self.record_result(patient.id, "ED Assessment to Decision", remaining_time)
 
         print(f"Patient {patient.id} spends {total_ed_assessment_time:.1f} minutes being assessed in ED")
         self.record_result(patient.id, "ED Assessment Time Total", total_ed_assessment_time)
+        self.record_result(patient.id, "ED Assessment to Decision", remaining_time)
 
         # Routing logic
         ed_outcome = patient.ed_disposition
@@ -866,6 +873,15 @@ class Model:
             print(f"Patient {patient.id} admitted to AMU at {patient.amu_admission_time}")
 
             # Record time from referral to AMU admission
+            if hasattr(patient, "consultant_assessment_time"):
+                decision_point = "admitted_after_consultant"
+            elif hasattr(patient, "medical_assessment_time"):
+                decision_point = "admitted_before_consultant"
+            else:
+                decision_point = "admitted_before_medical"
+
+            self.record_result(patient.id, "Discharge Decision Point", decision_point)
+
             patient.arrival_to_amu_admission = patient.amu_admission_time - patient.arrival_time
             patient.referral_to_amu_admission = patient.amu_admission_time - patient.referral_to_medicine_time
             self.record_result(patient.id, "Arrival to AMU Admission", patient.arrival_to_amu_admission)
@@ -892,7 +908,6 @@ class Model:
             
         # Check if the patient has already been admitted to AMU before the assessment starts
             if patient.amu_admission_time is not None and patient.amu_admission_time <= self.env.now:
-                self.record_result(patient.id, "Discharge Decision Point", "admitted AMU pre-medical assessment")
                 print(f"{self.env.now:.2f}: Patient {patient.id} admitted to AMU before initial medical assessment.")
                 return  # Exit the process if the patient has already been admitted to AMU
 
@@ -903,11 +918,17 @@ class Model:
             print(f"{end_medical_q:.2f}: Medical doctor starts assessing Patient {patient.id}.")
 
     
-            # Sample the medical assessment time from a specified distribution
-            med_assessment_time = np.random.gamma(
-                    shape =self.global_params.gamma_shape_medical_assessment,
-                    scale =self.global_params.gamma_scale_medical_assessment)
-            
+            # Sample the medical assessment time from log normal distribution
+            raw_time = np.random.lognormal(
+            mean=self.global_params.mu_medical_service_time,
+            sigma=self.global_params.sigma_medical_service_time
+            )
+
+            # Truncate to min and max values
+            med_assessment_time = min(
+                max(raw_time,self.global_params.min_medical_service_time),
+            self.global_params.max_medical_service_time  
+            )
             
             yield self.env.timeout(med_assessment_time)
             print(f"Patient {patient.id} spends {med_assessment_time} minutes with medical doctor")
@@ -972,8 +993,8 @@ class Model:
             if random.random() < self.global_params.consultant_discharge_prob:
                 patient.discharged = True
                 patient.discharge_time = self.env.now
-                print(f"Patient {patient.id} discharged at {patient.discharge_time} after consultant assessment")
-                self.record_result(patient.id, "Discharge Decision Point", "after_consultant_assessment")
+                print(f"Patient {patient.id} discharged at {patient.discharge_time} discharged after consultant assessment")
+                self.record_result(patient.id, "Discharge Decision Point", "discharged_after_consultant_assessment")
                 time_in_system = self.env.now - patient.arrival_time
                 self.record_result(patient.id, "Time in System", time_in_system)
                 return  # Exit process here if discharged

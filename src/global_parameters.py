@@ -9,8 +9,11 @@ class GlobalParameters:
                  proportion_direct_primary_care,
                  ambulance_acuity_probabilities, 
                  walk_in_acuity_probabilities,
-                 sdec_threshold,
-                 ed_threshold, 
+
+                 
+                 medical_referral_rate,
+                 speciality_referral_rate,
+                 sdec_appropriate_rate,
 
                  ambulance_triage_nurse_capacity,
                  walk_in_triage_nurse_capacity,  
@@ -38,9 +41,13 @@ class GlobalParameters:
 
                  mu_ed_service_time, 
                  sigma_ed_service_time, 
+                 max_ed_service_time,
+                 min_ed_service_time, 
 
-                 gamma_shape_medical_assessment,
-                 gamma_scale_medical_assessment,
+                 mu_medical_service_time,
+                 sigma_medical_service_time,
+                 max_medical_service_time,
+                 min_medical_service_time,
 
                  initial_medicine_discharge_prob,
                  consultant_discharge_prob,
@@ -80,8 +87,9 @@ class GlobalParameters:
 
         # Outcome thresholds
 
-        self.sdec_threshold = sdec_threshold
-        self.ed_threshold = ed_threshold
+        self.sdec_appropriate_rate = sdec_appropriate_rate
+        self.medical_referral_rate = medical_referral_rate
+        self.speciality_referral_rate = speciality_referral_rate
 
         # Medicine discharge probabilities
 
@@ -112,6 +120,9 @@ class GlobalParameters:
 
         self.mu_ed_assessment_discharge = mu_ed_assessment_discharge
         self.sigma_ed_assessment_discharge = sigma_ed_assessment_discharge
+        self.max_ed_service_time = max_ed_service_time
+        self.min_ed_service_time = min_ed_service_time
+
 
         self.wb_shape_ed_assessment_admit = wb_shape_ed_assessment_admit
         self.wb_scale_ed_assessment_admit = wb_scale_ed_assessment_admit
@@ -119,9 +130,11 @@ class GlobalParameters:
         self.mu_ed_service_time = mu_ed_service_time
         self.sigma_ed_service_time = sigma_ed_service_time
      
-        self.gamma_shape_medical_assessment = gamma_shape_medical_assessment
-        self.gamma_scale_medical_assessment= gamma_scale_medical_assessment
-        
+        self.mu_medical_service_time =  mu_medical_service_time
+        self.sigma_medical_service_time =  sigma_medical_service_time
+        self.max_medical_service_time = max_medical_service_time
+        self.min_medical_service_time = min_medical_service_time 
+
         self.mean_consultant_assessment_time = mean_consultant_assessment_time
         self.stdev_consultant_assessment_time = stdev_consultant_assessment_time 
 
