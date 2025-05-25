@@ -1,7 +1,16 @@
 # run.py
 
+USE_ALT_MODEL = True  # Set to False to use the original model
+
+if USE_ALT_MODEL:
+    from src.trial_alt import AltTrial as Trial
+    print("Running simulation with AltModel logic.")
+else:
+    from src.trial import Trial
+    print("Running simulation with original model logic.")
+
 from src.global_parameters import GlobalParameters
-from src.trial import Trial
+
 
 if __name__ == "__main__":
     global_params = GlobalParameters(
@@ -32,17 +41,17 @@ if __name__ == "__main__":
 
         # Patient characteristic variables
 
-        sdec_appropriate_rate = 0.05,
+        sdec_appropriate_rate = 0.10,
 
         # ED disposition
-        medical_referral_rate = 0.15,
-        speciality_referral_rate = 0.05,
+        medical_referral_rate = 0.175,
+        speciality_referral_rate = 0.150,
         
         # Staffing resource
         ambulance_triage_nurse_capacity = 1,
         walk_in_triage_nurse_capacity = 2,
 
-        ed_doctor_capacity = 30,
+        ed_doctor_capacity = 24,
         medical_doctor_capacity = 5,
         consultant_capacity = 1, 
 
@@ -54,22 +63,22 @@ if __name__ == "__main__":
         weekend_sdec_base_capacity = 4, 
 
         # AMU capacity
-        max_amu_available_beds = 20,
+        max_amu_available_beds = 10,
         max_sdec_capacity = 10,
 
         # Service times
         mean_triage_assessment_time = 5,
         stdev_triage_assessment_time = 2,
     
-        mu_ed_assessment_discharge = 4.2, 
+        mu_ed_assessment_discharge = 4.1, 
         sigma_ed_assessment_discharge = 1.0, 
 
         wb_shape_ed_assessment_admit = 1.6,
         wb_scale_ed_assessment_admit = 1/0.01,
 
-        mu_ed_service_time = 3.9, 
+        mu_ed_service_time = 4.4, 
         sigma_ed_service_time = 0.5,
-        max_ed_service_time = 240,
+        max_ed_service_time = 120,
         min_ed_service_time = 30,  
 
         mu_medical_service_time = 4.5,
@@ -78,15 +87,15 @@ if __name__ == "__main__":
         max_medical_service_time = 240,
         min_medical_service_time = 30, 
 
-        mean_consultant_assessment_time = 25,
+        mean_consultant_assessment_time = 30,
         stdev_consultant_assessment_time = 10, 
        
-        initial_medicine_discharge_prob = 0.1,
-        consultant_discharge_prob = 0.3,
+        initial_medicine_discharge_prob = 0.10,
+        consultant_discharge_prob = 0.4,
         
-        simulation_time = 8880,
+        simulation_time = 11520,
         burn_in_time = 1440) # burn in to prevent initiation bias
         
     trial = Trial(global_params)
-    total_runs =5
+    total_runs = 50
     trial.run(total_runs)

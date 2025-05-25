@@ -56,17 +56,8 @@ burn_in_time = 1440 # burn in to prevent initiation bias
 simulation_time =  user_simulation_time + burn_in_time    
 
 
-# --- 2. Demand ---
-st.sidebar.subheader("Demand")
 
-ed_threshold = st.sidebar.slider(
-    "ED referral threshold", min_value=0.1, max_value=1.0, value=0.5, step=0.05
-)
-sdec_threshold = st.sidebar.slider(
-    "SDEC appropriateness threshold", min_value=0.1, max_value=1.0, value=0.6, step=0.05
-)
-
-# --- 3. Capacity ---
+# --- 1. Capacity ---
 
 st.sidebar.subheader("Capacity")
 
@@ -77,7 +68,7 @@ sdec_close_hour = st.sidebar.slider(
     "SDEC closing hours ", min_value = 0, max_value= 23, value= 17, step=1 
 )
 
-# --- 4. Staffing resource ---
+# --- 2. Staffing resource ---
 
 st.sidebar.subheader("Staffing")
 
@@ -115,6 +106,14 @@ global_params = GlobalParameters(
     ambulance_proportion = 20,
     walk_in_proportion = 80,
     proportion_direct_primary_care = 0.07,  
+
+     # Patient characteristic variables
+
+    sdec_appropriate_rate = 0.10,
+
+    # ED disposition
+    medical_referral_rate = 0.15,
+    speciality_referral_rate = 0.05,
     
     # Fixed bed capacity
 
@@ -142,9 +141,7 @@ global_params = GlobalParameters(
     5: 0.20,
     },  
 
-    # Thresholds
-    sdec_threshold=sdec_threshold,
-    ed_threshold=ed_threshold,
+
 
     # Staffing
     ambulance_triage_nurse_capacity=ambulance_triage_nurse_capacity,
@@ -159,27 +156,36 @@ global_params = GlobalParameters(
 
     # Service times
 
+ 
+        
+    # Service times
     mean_triage_assessment_time = 5,
     stdev_triage_assessment_time = 2,
-        
-    mean_ed_assessment_time = 60,
-    stdev_ed_assessment_time = 30,
 
-    mu_ed_delay_time_discharge = 4.5,
-    sigma_ed_delay_time_discharge = 1.0,
+    mu_ed_assessment_discharge = 4.2, 
+    sigma_ed_assessment_discharge = 1.0, 
 
-    mu_ed_delay_time_admission = 4.6,
-    sigma_ed_delay_time_admission = 1.2,
+    wb_shape_ed_assessment_admit = 1.6,
+    wb_scale_ed_assessment_admit = 1/0.01,
 
-    mean_initial_medical_assessment_time = 60,
-    stdev_initial_medical_assessment_time = 30, 
+    mu_ed_service_time = 4.4, 
+    sigma_ed_service_time = 0.5,
+    max_ed_service_time = 120,
+    min_ed_service_time = 30,  
 
-    mean_consultant_assessment_time = 25,
+    mu_medical_service_time = 4.5,
+    sigma_medical_service_time = 0.68,
+
+    max_medical_service_time = 240,
+    min_medical_service_time = 30, 
+
+    mean_consultant_assessment_time = 30,
     stdev_consultant_assessment_time = 10, 
-       
+    
+
      # Decision Probabilities
 
-    initial_medicine_discharge_prob = 0.1,
+    initial_medicine_discharge_prob = 0.05,
     consultant_discharge_prob = 0.3)
 
     

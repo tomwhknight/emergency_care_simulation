@@ -343,6 +343,7 @@ class Model:
             # --- Medical Assessment Process ---
             "Queue Length Medical Doctor": np.nan,
             "Arrival to Medical Assessment": np.nan,
+            "Referral to Medical Assessment": np.nan, 
             "Medical Assessment Service Time": np.nan,
       
 
@@ -606,7 +607,7 @@ class Model:
             print(f"{self.env.now:.2f}: Doctors on shift at hour {current_hour}: {available_doctors}")
 
             # Step 4: Determine how many doctors to send on break (16% of available doctors)
-            num_on_break = max(1, int(0.20 * available_doctors))  # Ensure at least 1 doctor takes a break
+            num_on_break = max(1, int(0.2 * available_doctors))  # Ensure at least 1 doctor takes a break
 
             # Step 5: Randomly select doctors to take a break
             for _ in range(num_on_break):
@@ -657,7 +658,7 @@ class Model:
             current_hour = extract_hour(self.env.now)
 
             # Check if the current time is within the off-duty period (21:00–07:00)
-            if current_hour >= 21 or current_hour < 7:
+            if current_hour >= 20 or current_hour < 7:
                 print(f"{self.env.now:.2f}: Consultants are off-duty (21:00–07:00).")
                 with self.consultant.request(priority=-1) as req:
                     yield req  # Block the resource
@@ -769,14 +770,17 @@ class Model:
     def ed_assessment(self, patient):
         """Simulate ED assessment."""
         with self.ed_doctor.request(priority=patient.priority) as req:
-            print(f"ED Doctor Queue at time of request: {len(self.ed_doctor.queue)} patients at time {self.env.now}")
+            print(f"Patient {patient.id} ED Doctor Queue at time of request: {len(self.ed_doctor.queue)} patients at time {self.env.now}")
             self.record_result(patient.id, "Queue Length ED doctor", len(self.ed_doctor.queue))
             yield req
+            
             
             # Assessment starts once doctor is available
             ed_assessment_start_time = self.env.now
             wait_time = ed_assessment_start_time - patient.arrival_time
             self.record_result(patient.id, "Arrival to ED Assessment", wait_time)
+            print(f"[{self.env.now:.2f}] Doctor in use count: {self.ed_doctor.count} / {self.ed_doctor.capacity}")
+            print(f"Patient {patient.id} arrival to assessment {wait_time}")
             print(f"Patient {patient.id} starts ED assessment at {ed_assessment_start_time}")
           
             # Sample total assessment time based on disposition
@@ -785,30 +789,32 @@ class Model:
                     mean=self.global_params.mu_ed_assessment_discharge,
                     sigma=self.global_params.sigma_ed_assessment_discharge), 
                     self.global_params.min_ed_service_time)
-                
             elif patient.ed_disposition in ["Refer - Medicine", "Refer - Speciality", "Refer - Paeds"]:
-                total_ed_assessment_time = max(np.random.weibull(self.global_params.wb_shape_ed_assessment_admit *
-                    self.global_params.wb_scale_ed_assessment_admit), self.global_params.min_ed_service_time)
+                total_ed_assessment_time = max(
+                    np.random.weibull(self.global_params.wb_shape_ed_assessment_admit) * 
+                    self.global_params.wb_scale_ed_assessment_admit,
+                    self.global_params.min_ed_service_time
+                )    
 
-             # Sample how long doctor is needed (can’t exceed total time)
+
+            # Sample how long doctor is needed (can’t exceed total time)
             raw_service_time = np.random.lognormal(
                     mean=self.global_params.mu_ed_service_time,
                     sigma=self.global_params.sigma_ed_service_time
                 )
-            ed_service_time = min(max(raw_service_time, self.global_params.min_ed_service_time), self.global_params.max_ed_service_time
+            ed_service_time = min(
+                max(raw_service_time, self.global_params.min_ed_service_time), 
+                self.global_params.max_ed_service_time,
+                total_ed_assessment_time
             )
 
             # Doctor is held only for service time
             yield self.env.timeout(ed_service_time)
             self.record_result(patient.id, "ED Assessment Service Time", ed_service_time)
+            
 
-        remaining_time = total_ed_assessment_time - ed_service_time
-        if remaining_time > 0:
-            yield self.env.timeout(remaining_time)
-            print(f"Patient {patient.id} spends {total_ed_assessment_time:.1f} minutes being assessed in ED")
-            self.record_result(patient.id, "ED Assessment Time Total", total_ed_assessment_time)
-            self.record_result(patient.id, "ED Assessment to Decision", remaining_time)
-
+        remaining_time = max(0, total_ed_assessment_time - ed_service_time)
+        yield self.env.timeout(remaining_time)
         print(f"Patient {patient.id} spends {total_ed_assessment_time:.1f} minutes being assessed in ED")
         self.record_result(patient.id, "ED Assessment Time Total", total_ed_assessment_time)
         self.record_result(patient.id, "ED Assessment to Decision", remaining_time)
@@ -881,7 +887,6 @@ class Model:
                 decision_point = "admitted_before_medical"
 
             self.record_result(patient.id, "Discharge Decision Point", decision_point)
-
             patient.arrival_to_amu_admission = patient.amu_admission_time - patient.arrival_time
             patient.referral_to_amu_admission = patient.amu_admission_time - patient.referral_to_medicine_time
             self.record_result(patient.id, "Arrival to AMU Admission", patient.arrival_to_amu_admission)
@@ -896,9 +901,7 @@ class Model:
 
     def initial_medical_assessment(self, patient):
         """Simulate initial medical assessment and decide discharge or admission."""
-        start_medical_queue_time = self.env.now
         print(f"Patient {patient.id} added to the medical take queue at {self.env.now}")
-     
         # Queue length of take at the time patient referred 
         queue_length_medical_doctor = len(self.medical_doctor.queue)
         self.record_result(patient.id, "Queue Length Medical Doctor", queue_length_medical_doctor)
@@ -912,12 +915,14 @@ class Model:
                 return  # Exit the process if the patient has already been admitted to AMU
 
              # Continue with medical assessment if not admitted
-            end_medical_q = self.env.now
-            wait_for_medical = end_medical_q - start_medical_queue_time
-            self.record_result(patient.id, "Arrival to Medical Assessment", wait_for_medical)
-            print(f"{end_medical_q:.2f}: Medical doctor starts assessing Patient {patient.id}.")
+            end_medical_queue_time = self.env.now
+            arrival_to_medical = end_medical_queue_time - patient.arrival_time
+            referral_to_medical = end_medical_queue_time -  patient.referral_to_medicine_time
 
-    
+            self.record_result(patient.id, "Arrival to Medical Assessment", arrival_to_medical)
+            self.record_result(patient.id, "Referral to Medical Assessment", referral_to_medical)
+            print(f"{end_medical_queue_time:.2f}: Medical doctor starts assessing Patient {patient.id}.")
+
             # Sample the medical assessment time from log normal distribution
             raw_time = np.random.lognormal(
             mean=self.global_params.mu_medical_service_time,
@@ -929,7 +934,7 @@ class Model:
                 max(raw_time,self.global_params.min_medical_service_time),
             self.global_params.max_medical_service_time  
             )
-            
+
             yield self.env.timeout(med_assessment_time)
             print(f"Patient {patient.id} spends {med_assessment_time} minutes with medical doctor")
             
@@ -947,30 +952,35 @@ class Model:
             if random.random() < self.global_params.initial_medicine_discharge_prob:
                 patient.discharged = True
                 patient.discharge_time = self.env.now
+                time_in_system = self.env.now - patient.arrival_time
                 self.record_result(patient.id, "Discharge Decision Point", "after_initial_medical_assessment")
+                self.record_result(patient.id, "Time in System", time_in_system)
+                
                 print(f"Patient {patient.id} Discharged at {patient.discharge_time} after initial medical assessment")
                 return  # Exit process here if discharged
             
-            # If not discharged, proceed to consultant assessment
+            # If already admitted, skip consultant assessment
+            if patient.amu_admission_time is not None and patient.amu_admission_time <= self.env.now:
+                print(f"Patient {patient.id} already admitted to AMU, skipping consultant assessment.")
+                return
+
             self.env.process(self.consultant_assessment(patient))
         
     # Simulate consultant assessment process
 
     def consultant_assessment(self, patient):
         """Simulate consultant review after initial medical assessment."""
-
-        # If patient was already admitted to AMU, skip consultant assessment
-        if patient.amu_admission_time is not None and patient.amu_admission_time <= self.env.now:
-            print(f"{self.env.now:.2f}: Patient {patient.id} already admitted to AMU. Skipping consultant assessment.")
-            return
-        
-        self.record_result(patient.id, "Queue Length Consultant", len(self.consultant.queue))
-        
-
+    
         with self.consultant.request(priority = patient.priority) as req:
+            self.record_result(patient.id, "Queue Length Consultant", len(self.consultant.queue))
             print(f"[{self.env.now:.2f}] Consultant capacity: {self.consultant.capacity}")
             print(f"[{self.env.now:.2f}] Consultant queue length before request: {len(self.consultant.queue)}")
-            yield req  # Wait until a consultant is available
+            yield req 
+
+             # If patient was already admitted to AMU, skip consultant assessment
+            if patient.amu_admission_time is not None and patient.amu_admission_time <= self.env.now:
+                print(f"{self.env.now:.2f}: Patient {patient.id} already admitted to AMU. Skipping consultant assessment.")
+                return
             
             # Calculate the waiting time from end of referral to start of consultant assessment
             end_consultant_q = self.env.now
