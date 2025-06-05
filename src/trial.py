@@ -87,8 +87,16 @@ class Trial:
                 progress_bar.progress(percent, text=f"Running simulation... {percent}%")
 
         # Move 'Run Number' to the first column for cleaner presentation
+        
+        # Only assign "Run Number" if it doesn't already exist (avoids overwriting in multi-run scenarios)
+        if "Run Number" not in self.agg_results_df.columns:
+            self.agg_results_df["Run Number"] = run_number
+
+        # Move "Run Number" to the first column for presentation
         cols = ["Run Number"] + [col for col in self.agg_results_df.columns if col != "Run Number"]
         self.agg_results_df = self.agg_results_df[cols]
+
+
         # Ensure the directory 'results' exists
         if not os.path.exists('results'):
             os.makedirs('results')
@@ -100,14 +108,13 @@ class Trial:
 
        # Save hourly results
         hourly_result_path = os.path.join('data', 'results', 'summary_results_hour.csv')
-        hourly_data.to_csv(hourly_result_path, index=False)
+        self.agg_results_hourly.to_csv(hourly_result_path, index=False)
         print(f"Hourly results saved to {hourly_result_path}")
 
         # Save daily results
         daily_result_path = os.path.join('data', 'results', 'summary_results_day.csv')
-        daily_data.to_csv(daily_result_path, index=False)
+        self.agg_results_daily.to_csv(daily_result_path, index=False)
         print(f"Daily results saved to {daily_result_path}")
-
 
         # Save aggegarted complete results
         overall_summary_path = os.path.join('data', 'results', 'overall_summary.csv')
