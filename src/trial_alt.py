@@ -2,11 +2,14 @@ import pandas as pd
 import os
 from src.model_alt import AltModel  # uses your modified model logic
 
+
 class AltTrial:
     def __init__(self, global_params):
         self.global_params = global_params
         
         self.agg_results_df = pd.DataFrame()
+        self.agg_event_log = pd.DataFrame(columns=["run_number", "patient_id", "event", "timestamp"])
+
         self.agg_results_hourly = pd.DataFrame()
         self.agg_results_daily = pd.DataFrame()
         self.agg_results_complete = pd.DataFrame()
@@ -24,8 +27,10 @@ class AltTrial:
 
             model.run_results_df_reset = model.run_results_df.reset_index()
             model.run_results_df_reset["Run Number"] = i + 1
+            
             self.agg_results_df = pd.concat([self.agg_results_df, model.run_results_df_reset], ignore_index=True)
-
+            self.agg_event_log = pd.concat([self.agg_event_log, model.event_log_df], ignore_index=True)
+            
             hourly_data, daily_data, complete_data = model.outcome_measures()
             self.agg_results_hourly = pd.concat([self.agg_results_hourly, hourly_data], ignore_index=True)
             self.agg_results_daily = pd.concat([self.agg_results_daily, daily_data], ignore_index=True)
@@ -66,6 +71,11 @@ class AltTrial:
         self.agg_results_df.to_csv(os.path.join('data', 'results', 'results_from_alt_model.csv'), index=False)
         print("Saved: results_from_alt_model.csv")
 
+        # Save event log
+        event_log_path = os.path.join('data', 'results', 'event_log_from_alt_model.csv')
+        self.agg_event_log.to_csv(event_log_path, index=False)
+        print(f"Event log saved to {event_log_path}")
+
         self.agg_results_hourly.to_csv(os.path.join('data', 'results', 'summary_results_hour_from_alt_model.csv'), index=False)
         print("Saved: summary_results_hour_from_alt_model.csv")
 
@@ -80,6 +90,5 @@ class AltTrial:
 
         self.agg_amu_queue_df.to_csv(os.path.join('data', 'results', 'amu_queue_monitoring_from_alt_model.csv'), index=False)
         print("Saved: amu_queue_monitoring_from_alt_model.csv")
-
 
         return self.agg_results_df, self.agg_amu_queue_df

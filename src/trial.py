@@ -10,13 +10,15 @@ class Trial:
         # Initalise empty DataFrame for aggregated patient level results
         self.agg_results_df = pd.DataFrame() 
 
+         # Initalise empty DataFrame for aggregated event log
+        self.agg_event_log = pd.DataFrame(columns=["run_number", "patient_id", "event", "timestamp"])
+
         # Initalise empty DataFrame for aggregated summary level results
         self.agg_results_hourly = pd.DataFrame()
         self.agg_results_daily = pd.DataFrame() 
         self.agg_results_complete = pd.DataFrame() 
 
         # Initalise empty DataFrame for aggegated queue results
-
         self.agg_consultant_queue_monitoring_df = pd.DataFrame(columns=["Simulation Time", "Hour of Day", "Queue Length"])
         self.agg_amu_queue_df = pd.DataFrame()  # Initialize an empty DataFrame for AMU queue monitoring results
 
@@ -43,6 +45,9 @@ class Trial:
             # Concatenate the results of each run to the global results DataFrame
             self.agg_results_df = pd.concat([self.agg_results_df, model.run_results_df_reset], ignore_index=True)
     
+            # Concatenate the event log for this run to the global event log DataFrame
+            self.agg_event_log = pd.concat([self.agg_event_log, model.event_log_df], ignore_index=True)
+            
             # Call the outcome_measures() method to get aggregated results for this run
             hourly_data, daily_data, complete_data = model.outcome_measures()
 
@@ -96,7 +101,6 @@ class Trial:
         cols = ["Run Number"] + [col for col in self.agg_results_df.columns if col != "Run Number"]
         self.agg_results_df = self.agg_results_df[cols]
 
-
         # Ensure the directory 'results' exists
         if not os.path.exists('results'):
             os.makedirs('results')
@@ -106,7 +110,12 @@ class Trial:
         self.agg_results_df.to_csv(patient_result_path, index=False)
         print(f"Patient results saved to {patient_result_path}")
 
-       # Save hourly results
+        # Save event log
+        event_log_path = os.path.join('data', 'results', 'event_log.csv')
+        self.agg_event_log.to_csv(event_log_path, index=False)
+        print(f"Event log saved to {event_log_path}")
+
+        # Save hourly results
         hourly_result_path = os.path.join('data', 'results', 'summary_results_hour.csv')
         self.agg_results_hourly.to_csv(hourly_result_path, index=False)
         print(f"Hourly results saved to {hourly_result_path}")
@@ -120,7 +129,6 @@ class Trial:
         overall_summary_path = os.path.join('data', 'results', 'overall_summary.csv')
         self.overall_summary.to_csv(overall_summary_path , index=False)
         print(f"Aggregated summary results saved to {overall_summary_path }")
-
 
         # Save queue monitoring results
         consultant_queue_result_path = os.path.join('data', 'results', 'consultant_queue_monitoring_results.csv')

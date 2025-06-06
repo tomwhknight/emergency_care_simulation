@@ -33,11 +33,7 @@ class Model:
         
         self.consultant_time_distribution = Lognormal(mean=self.global_params.mean_consultant_assessment_time, 
                                                    stdev=self.global_params.stdev_consultant_assessment_time)
-        
-
-        # Stochastic arriavl rate 
-
-        self.daily_referral_rates = {}
+    
 
         # Create results DF
 
@@ -112,6 +108,9 @@ class Model:
         # Create results DataFrame with structured standard columns
         self.run_results_df = pd.DataFrame(columns=self.standard_cols)
         self.run_results_df = self.run_results_df.set_index("Patient ID")
+
+         # Create an event log DataFrame with structured standard columns
+        self.event_log_df = pd.DataFrame(columns=["run_number", "patient_id", "event", "timestamp"])
         
         # Initialize DataFrame to monitor consultant queue
         self.consultant_queue_monitoring_df = pd.DataFrame(columns=['Simulation Time', 'Hour of Day', 'Queue Length'])
@@ -139,7 +138,20 @@ class Model:
         if self.env.now > self.burn_in_time:
             if column in self.run_results_df.columns and patient_id in self.run_results_df.index:
                 self.run_results_df.at[patient_id, column] = value
-    
+
+    def record_event(self, patient, event_name):
+        # Skip recording events during burn-in
+        if self.env.now <= self.burn_in_time:
+            return
+        
+        event_record = {
+            "run_number": self.run_number, 
+            "patient_id": patient.id,   
+            "event": event_name,
+            "timestamp": self.env.now
+        }
+        self.event_log_df = pd.concat([self.event_log_df, pd.DataFrame([event_record])], ignore_index=True)
+
     # --- Generator Methods ---
     def generate_arrivals(self):
         """Generate patient arrivals based on inter-arrival times."""
@@ -382,6 +394,9 @@ class Model:
             self.record_result(patient.id, "Clock Hour of Arrival", patient.clock_hour)
             self.record_result(patient.id, "Hour of Arrival", patient.current_hour)
 
+             # Record arrival in event log
+            self.record_event(patient, "arrival")
+
             if patient.ed_disposition == "Refer - Paeds":
                 self.record_result(patient.id, "Discharge Decision Point", "ed_referred_paeds")
             
@@ -436,7 +451,7 @@ class Model:
             print(f"[{self.env.now:.1f}] Bed released | Total beds: {self.total_beds_generated}")
         else:
             print(f"[{self.env.now:.1f}] No space to add bed — store full.")
-                      
+
     # Method to generate SDEC capacity
     def generate_sdec_slots(self):
         """Periodically release SDEC slots using a time-varying Poisson process."""
@@ -709,6 +724,7 @@ class Model:
             self.record_result(patient.id, "SDEC Accepted", True)
             self.record_result(patient.id, "SDEC Decision Reason", "Accepted")
             self.record_result(patient.id, "Discharge Decision Point", "after_sdec_acceptance")
+            self.record_event(patient, "sdec_acceptance")
             patient.discharged = True
             patient.discharge_time = self.env.now
             time_in_system = patient.discharge_time - patient.arrival_time
@@ -735,6 +751,7 @@ class Model:
             # Record the start time of ED assessment
             triage_nurse_assessment_start_time = self.env.now
             self.record_result(patient.id, "Arrival to Triage Nurse Assessment", triage_nurse_assessment_start_time - patient.arrival_time)
+            self.record_event(patient, "triage_start")
             print(f"Patient {patient.id} starts triage assessment at {triage_nurse_assessment_start_time}")
 
             # Sample from the triage nurse assessment distribution 
@@ -759,6 +776,7 @@ class Model:
             # Record the start time of ED assessment
             triage_nurse_assessment_start_time = self.env.now
             self.record_result(patient.id, "Arrival to Triage Nurse Assessment", triage_nurse_assessment_start_time - patient.arrival_time)
+            self.record_event(patient, "triage_start")
             print(f"Patient {patient.id} starts triage assessment at {triage_nurse_assessment_start_time}")
 
             # Sample from the triage nurse assessment distribution 
@@ -787,6 +805,7 @@ class Model:
             ed_assessment_start_time = self.env.now
             wait_time = ed_assessment_start_time - patient.arrival_time
             self.record_result(patient.id, "Arrival to ED Assessment", wait_time)
+            self.record_event(patient, "ed_assessment_start")
             print(f"[{self.env.now:.2f}] Doctor in use count: {self.ed_doctor.count} / {self.ed_doctor.capacity}")
             print(f"Patient {patient.id} arrival to assessment {wait_time}")
             print(f"Patient {patient.id} starts ED assessment at {ed_assessment_start_time}")
@@ -836,6 +855,7 @@ class Model:
             time_in_system = patient.discharge_time - patient.arrival_time
             self.record_result(patient.id, "Discharge Decision Point", "ed_discharge")
             self.record_result(patient.id, "Time in System", time_in_system)
+            self.record_event(patient, "discharge")
             print(f"Patient {patient.id} discharged from ED at {patient.discharge_time}")
             return
 
@@ -844,6 +864,7 @@ class Model:
             time_in_system = pseudo_departure_time - patient.arrival_time
             self.record_result(patient.id, "Discharge Decision Point", "ed_referred_other_specialty_pseudo_exit")
             self.record_result(patient.id, "Time in System", time_in_system)
+            self.record_event(patient, "referral_to_speciality")
             print(f"Patient {patient.id} referred to other specialty at {pseudo_departure_time}")
             return
 
@@ -851,6 +872,7 @@ class Model:
             patient.referral_to_medicine_time = self.env.now
             total_time_referral = self.env.now - patient.arrival_time
             self.record_result(patient.id, "Arrival to Referral", total_time_referral)
+            self.record_event(patient, "referral_to_medicine")
             print(f"Patient {patient.id} referred to medicine at {patient.referral_to_medicine_time}")
             yield self.env.process(self.handle_ed_referral(patient))
             
@@ -903,6 +925,8 @@ class Model:
             self.record_result(patient.id, "Arrival to AMU Admission", patient.arrival_to_amu_admission)
             self.record_result(patient.id, "Referral to AMU Admission", patient.referral_to_amu_admission)
             self.record_result(patient.id, "Time in System", patient.arrival_to_amu_admission)
+            self.record_event(patient, "amu_admission")
+
 
             # Mark the patient as transferred to AMU
             patient.transferred_to_amu = True
@@ -929,9 +953,9 @@ class Model:
             end_medical_queue_time = self.env.now
             arrival_to_medical = end_medical_queue_time - patient.arrival_time
             referral_to_medical = end_medical_queue_time -  patient.referral_to_medicine_time
-
             self.record_result(patient.id, "Arrival to Medical Assessment", arrival_to_medical)
             self.record_result(patient.id, "Referral to Medical Assessment", referral_to_medical)
+            self.record_event(patient, "medical_assessment_start")
             print(f"{end_medical_queue_time:.2f}: Medical doctor starts assessing Patient {patient.id}.")
 
             # Sample the medical assessment time from log normal distribution
@@ -958,7 +982,9 @@ class Model:
             total_time_medical = self.env.now - patient.arrival_time
             patient.total_time_medical = total_time_medical
             self.record_result(patient.id, "Arrival to End of Medical Assessment",  total_time_medical)
+            self.record_event(patient, "initial_medical_assessment_end")
             
+
             # Discharge decision with a low probability (e.g., 5%)
             if random.random() < self.global_params.initial_medicine_discharge_prob:
                 patient.discharged = True
@@ -966,6 +992,7 @@ class Model:
                 time_in_system = self.env.now - patient.arrival_time
                 self.record_result(patient.id, "Discharge Decision Point", "after_initial_medical_assessment")
                 self.record_result(patient.id, "Time in System", time_in_system)
+                self.record_event(patient, "discharge")
                 
                 print(f"Patient {patient.id} Discharged at {patient.discharge_time} after initial medical assessment")
                 return  # Exit process here if discharged
@@ -998,6 +1025,7 @@ class Model:
             print(f"{end_consultant_q:.2f}: Consultant starts assessing Patient {patient.id}")
             wait_for_consultant = end_consultant_q - patient.referral_to_medicine_time
             self.record_result(patient.id, "Referral to Consultant Assessment", wait_for_consultant)
+            self.record_event(patient, "consultant_assessment_start")
 
             # Simulate consultant assessment time using the lognormal distribution
             consultant_assessment_time = self.consultant_time_distribution.sample()
@@ -1009,6 +1037,7 @@ class Model:
             # Calculate and record the total time from arrival to the end of consultant assessment
             total_time_consultant = self.env.now - patient.arrival_time
             self.record_result(patient.id, "Arrival to Consultant Assessment", total_time_consultant)
+            self.record_event(patient, "consultant_assessment_end")
             
             # Discharge after consolutant assessment logic
             if random.random() < self.global_params.consultant_discharge_prob:
@@ -1018,6 +1047,7 @@ class Model:
                 self.record_result(patient.id, "Discharge Decision Point", "discharged_after_consultant_assessment")
                 time_in_system = self.env.now - patient.arrival_time
                 self.record_result(patient.id, "Time in System", time_in_system)
+                self.record_event(patient, "discharge")
                 return  # Exit process here if discharged
       
     # --- Run Method ---
