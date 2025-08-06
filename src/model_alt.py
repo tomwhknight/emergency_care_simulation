@@ -8,8 +8,7 @@ import numpy as np
 
 
 class AltModel(Model):
-
-    
+   
     # --- Generator Methods --
     def generate_arrivals(self):
         print("AltModel: generate_arrivals is running") 
@@ -64,7 +63,7 @@ class AltModel(Model):
             news2 = random.choices(news2_values, weights=news2_weights, k=1)[0]
 
             # Determine if patient is adult
-            adult = age >= 17  
+            adult = age >= 16  
            
             # Determine group label based on patient age and NEWS2
             if not adult:
@@ -251,6 +250,9 @@ class AltModel(Model):
             self.record_result(patient.id, "Clock Hour of Arrival", patient.clock_hour)
             self.record_result(patient.id, "Hour of Arrival", patient.current_hour)
 
+            # Record arrival in event log
+            self.record_event(patient, "arrival")
+
             if patient.ed_disposition == "Refer - Paeds":
                 self.record_result(patient.id, "Discharge Decision Point", "ed_referred_paeds")
             
@@ -271,8 +273,6 @@ class AltModel(Model):
             arrival_interval = random.expovariate(mean_arrival_rate)
             yield self.env.timeout(arrival_interval)
 
-    
-    
     def walk_in_triage(self, patient):
         """Modified triage logic for walk-ins with conditional ED bypass"""
         print(f"Walk-in Triage Queue at time of request: {len(self.walk_in_triage_nurse.queue)} patients at time {self.env.now}")
@@ -282,6 +282,7 @@ class AltModel(Model):
 
             triage_nurse_assessment_start_time = self.env.now
             self.record_result(patient.id, "Arrival to Triage Nurse Assessment", triage_nurse_assessment_start_time - patient.arrival_time)
+            self.record_event(patient, "triage_start")
             print(f"Patient {patient.id} starts triage assessment at {triage_nurse_assessment_start_time}")
 
             triage_nurse_assessment_time = self.triage_time_distribution.sample()
@@ -294,7 +295,7 @@ class AltModel(Model):
         # --- Determine priority level and conditional referral ---
         acuity = patient.acuity
         news2 = patient.news2
-        if (acuity in [3, 4, 5] or news2 < 5) and patient.ed_disposition == "Refer - Medicine":
+        if (acuity in [3, 4, 5] and news2 < 5) and patient.ed_disposition == "Refer - Medicine" and (9 <= patient.current_hour < 21):
             print(f"Patient {patient.id} bypasses ED assessment")
             patient.referral_to_medicine_time = self.env.now
             yield self.env.process(self.handle_ed_referral(patient))
@@ -309,6 +310,7 @@ class AltModel(Model):
 
             triage_nurse_assessment_start_time = self.env.now
             self.record_result(patient.id, "Arrival to Triage Nurse Assessment", triage_nurse_assessment_start_time - patient.arrival_time)
+            self.record_event(patient, "triage_start")
             print(f"Patient {patient.id} starts triage assessment at {triage_nurse_assessment_start_time}")
 
             triage_nurse_assessment_time = self.triage_time_distribution.sample()
@@ -321,7 +323,7 @@ class AltModel(Model):
         # --- Determine priority level and conditional referral ---
         acuity = patient.acuity
         news2 = patient.news2
-        if (acuity in [3, 4, 5] or news2 < 5) and patient.ed_disposition == "Refer - Medicine":
+        if (acuity in [3, 4, 5] and news2 < 5) and patient.ed_disposition == "Refer - Medicine" and (9 <= patient.current_hour < 21):
             print(f"Patient {patient.id} bypasses ED assessment")
             patient.referral_to_medicine_time = self.env.now
             yield self.env.process(self.handle_ed_referral(patient))

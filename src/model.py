@@ -7,6 +7,7 @@ from src.helper import calculate_hour_of_day, extract_day_of_week, extract_hour
 from src.helper import Lognormal
 
 class Model:
+
     def __init__(self, global_params, burn_in_time, run_number):
         """Initialize the model with the given global parameters."""
         self.env = simpy.Environment()
@@ -24,17 +25,23 @@ class Model:
         self.sdec_slot_rate_data = pd.read_csv(self.global_params.sdec_slot_rate_file)
         self.arrival_rate_data = pd.read_csv(self.global_params.arrival_rate_file)
         self.news_distribution_data = pd.read_csv(self.global_params.news2_file)
-        self.admission_prob_distribution_data = pd.read_csv(self.global_params.admission_prob_file)
+        self.admission_probability_distribution_data = pd.read_csv(self.global_params.admission_probability_file)
+        self.ed_service_time_scaling_factor_data = pd.read_csv(self.global_params.ed_service_time_scaling_factor_file)
+
 
         # Instantiate the Lognormal distribution for triage assessment time
         self.triage_time_distribution = Lognormal(mean=self.global_params.mean_triage_assessment_time,
                                                   stdev=self.global_params.stdev_triage_assessment_time)
         
+        self.blood_draw_time_distribution = Lognormal(mean=self.global_params.mean_blood_draw_time,
+                                                  stdev=self.global_params.stdev_blood_draw_time)
         
+        self.blood_lab_time_distribution = Lognormal(mean=self.global_params.mean_blood_lab_time,
+                                                  stdev=self.global_params.stdev_blood_lab_time)
+
         self.consultant_time_distribution = Lognormal(mean=self.global_params.mean_consultant_assessment_time, 
                                                    stdev=self.global_params.stdev_consultant_assessment_time)
     
-
         # Create results DF
 
         # Define standard columns, structured by category
@@ -55,7 +62,10 @@ class Model:
             "Source of Referral",
             "Mode of Arrival",
             "Acuity",
+            "Admission Probability"
+            "Has Bloods",
             "ED Disposition",
+            
 
             # --- Triage Information ---
             "Queue Length Ambulance Triage Nurse",
@@ -69,6 +79,19 @@ class Model:
             "SDEC Accepted",
             "SDEC Decision Reason",
 
+            # --- Tests ---
+
+            "Bloods Requested",
+            "Bloods Requested at Triage",
+            "Bloods Requested after Triage",
+
+            "Queue Length Bloods",
+            "Request to Bloods Obtained",
+            "Arrival to Bloods Obtained"
+            "Arrival to Bloods Reported"
+            "Blood Draw Service Time",
+            "Bloods Lab Service Time",
+
             # --- ED assessment ---
 
             "Queue Length ED doctor",
@@ -76,6 +99,7 @@ class Model:
             "ED Assessment Time Total",
             "ED Assessment Service Time",
             "ED Assessment to Decision",
+            
     
             # --- Referral to Medicine ---
             "Arrival to Referral",
@@ -121,7 +145,7 @@ class Model:
         # Create simpy resources for staffing levels
         self.ambulance_triage_nurse = simpy.Resource(self.env, capacity=self.global_params.ambulance_triage_nurse_capacity)
         self.walk_in_triage_nurse = simpy.PriorityResource(self.env, capacity = self.global_params.walk_in_triage_nurse_capacity)
-        
+        self.hca = simpy.PriorityResource(self.env, capacity = self.global_params.hca_capacity)
         self.ed_doctor = simpy.PriorityResource(self.env, capacity=self.global_params.ed_doctor_capacity)
         self.medical_doctor = simpy.PriorityResource(self.env, capacity=self.global_params.medical_doctor_capacity)
         self.consultant = simpy.PriorityResource(self.env, capacity=self.global_params.consultant_capacity)
@@ -206,45 +230,10 @@ class Model:
             news2_weights = self.news_distribution_data["news2_probs"].tolist()
             news2 = random.choices(news2_values, weights=news2_weights, k=1)[0]
 
-            # Determine if patient is adult
-            adult = age >= 17  
-           
-            # Determine group label based on patient age and NEWS2
-            if not adult:
-                group = "under_17"
-            elif age >= 75 and news2 > 4:
-                group = "high_age_high_news"
-            elif age >= 75 and news2 <= 4:
-                group = "high_age_low_news"
-            elif 17 <= age < 75 and news2 <= 4:
-                group = "working_age_low_news"
-            elif 17 <= age < 75 and news2 > 4:
-                group = "working_age_high_news"
-            else:
-                group = "unknown"
-
-            if adult:
-                params = self.admission_prob_distribution_data[
-                    self.admission_prob_distribution_data["group"] == group
-                    ].iloc[0]
-
-                # Sample from Beta distribution
-                if params["dist"] == "beta":
-                    a = params["shape1"]
-                    b = params["shape2"]
-                    admission_prob = random.betavariate(a, b) 
-
-                elif params["dist"] == "norm":
-                    mu = params["mean"]
-                    sigma = params["sd"]
-                    admission_prob = random.gauss(mu, sigma)
-
-                # Clip probability to [0, 1]
-                admission_prob = min(max(admission_prob, 0), 1)
-
-            else:
-                admission_prob = np.nan  # or np.nan if using pandas later
+            # Assign if patient is adult
             
+            adult = age >= 16  
+           
             # Assign source of referral
 
             source_of_referral = random.choices(
@@ -255,38 +244,31 @@ class Model:
                 ]
             )[0]
 
+            # Admission probability 
+            admission_probs = self.admission_probability_distribution_data["admission_probability"].values
+            weights = self.admission_probability_distribution_data["weight"].values
+            admission_probability = np.random.choice(admission_probs, p=weights)
+
+
+
             # SDEC appropriate
 
             if adult:
                 sdec_appropriate = random.random() < self.global_params.sdec_appropriate_rate
             else:
                 sdec_appropriate = np.nan
-
-            # Stochastic variation of ED disposition 
-            
-            if not adult:
-                ed_disposition = random.choices(
-                    ["Discharge", "Refer - Paeds"],
-                    weights=[0.9, 0.1],
-                    k=1
-                )[0] 
-
-            else:
-                if random.random() < self.global_params.medical_referral_rate:
-                    ed_disposition = "Refer - Medicine"
-                else:
-                    if random.random() < self.global_params.speciality_referral_rate:
-                        ed_disposition = "Refer - Speciality"
-                    else:
-                        ed_disposition = "Discharge"
                         
-          
-            # --- Determine priority level ---
+            # Assign priority level
+
             if acuity in [1, 2] or news2 > 4:
                 priority = 0  # Higher priority
             else:
                 priority = 1  # Lower priority
 
+            # Placeholders
+
+            ed_disposition = None
+            has_bloods = False
 
             # Create instance of patient class
             
@@ -301,10 +283,11 @@ class Model:
             age,
             adult,
             news2,
-            admission_prob, 
+            admission_probability,
             acuity,
             sdec_appropriate,
             ed_disposition,
+            has_bloods, 
             priority
             )
 
@@ -321,11 +304,9 @@ class Model:
             "Patient Age": age,
             "Adult": adult,
             "NEWS2": news2,
-            "Admission Probability": admission_prob ,
             "Source of Referral": source_of_referral,
             "Acuity": acuity,
-            "ED Disposition": ed_disposition,
-
+            "Admission Probabiliy": admission_probability, 
 
             # --- Triage-Related Metrics ---
             "Queue Length Walk in Triage Nurse": np.nan,
@@ -338,12 +319,26 @@ class Model:
             "SDEC Accepted": np.nan,
             "SDEC Decision Reason": "",
 
+            # --- Test related metrics ---
+
+            "Bloods Requested": "",
+            "Bloods Requested at Triage": "",
+            "Bloods Requested after Triage": "",
+
+            "Queue Length Bloods": np.nan,
+            "Request to Bloods Obtained": np.nan,
+            "Arrival to Bloods Obtained": np.nan,
+            "Arrival to Bloods Reported": np.nan,
+            "Blood Draw Service Time": np.nan,
+            "Bloods Lab Service Time": np.nan, 
+
             # --- ED Assessment Metrics ---
             "Queue Length ED doctor": np.nan,
             "Arrival to ED Assessment": np.nan,
             "ED Assessment Time Total": np.nan,
             "ED Assessment Service Time": np.nan,
             "ED Assessment to Decision": np.nan,
+            "ED Disposition": "",
 
             # --- Referral to Medicine ---
             "Arrival to Referral": np.nan,
@@ -740,6 +735,7 @@ class Model:
     # --- Processes (Patient Pathways) --- 
 
     # Simulate triage process
+
     def walk_in_triage(self, patient):
         """Simulate triage assessment for walk ins"""
         print(f"Walk-in Triage Queue at time of request: {len(self.walk_in_triage_nurse.queue)} patients at time {self.env.now}")
@@ -788,10 +784,57 @@ class Model:
             self.record_result(patient.id, "Triage Nurse Assessment Service Time", triage_nurse_assessment_time)
             patient.triage_nurse_assessment_time = triage_nurse_assessment_time 
 
+            # Decide if blood tests are needed based on admission probability
+            
+            if random.random() < self.global_params.bloods_request_probability:
 
-         # After triage, proceed ED assessment
+                self.record_result(patient.id, "Bloods Requested", "Yes")
+                self.record_result(patient.id, "Bloods Requested at Triage", "Yes")
+                yield self.env.process(self.tests_draw(patient))
+                patient.had_bloods = True
+            else:
+                self.record_result(patient.id, "Bloods Requested", "No")
+                self.record_result(patient.id, "Bloods Requested at Triage", "No")
+                patient.had_bloods = False
+
+        # After triage, proceed ED assessment
         yield self.env.process(self.refer_to_sdec(patient, fallback_process = self.ed_assessment))
 
+    # Simulate bloods tests
+    def tests_draw(self, patient):
+        """Simulate an HCA drawing tests after triage."""
+        with self.hca.request() as req:
+            self.record_result(patient.id, "Queue Length Bloods", len(self.hca.queue))
+            blood_start_wait = self.env.now
+            yield req
+            
+            # Sample test draw duration
+            blood_draw_duration = self.blood_draw_time_distribution.sample()
+            yield self.env.timeout(blood_draw_duration)
+            
+            bloods_obtained = self.env.now
+            request_to_obtained = bloods_obtained - blood_start_wait
+            arrival_to_obtained = bloods_obtained - patient.arrival_time    
+
+            self.record_result(patient.id, "Arrival to Bloods Obtained", arrival_to_obtained)
+            self.record_result(patient.id, "Request to Bloods Obtained", request_to_obtained)
+            self.record_result(patient.id, "Blood Draw Service Time", blood_draw_duration)
+            print(f"[{self.env.now:.2f}] Patient {patient.id} Blood test draw complete.")
+
+        # After draw, proceed to lab processing
+        self.env.process(self.tests_lab(patient)) 
+
+    def tests_lab(self, patient):
+        """Simulate lab processing time for test results."""
+        lab_duration = self.blood_lab_time_distribution.sample()
+        yield self.env.timeout(lab_duration)
+        blood_complete_time = self.env.now
+        total_test_time = blood_complete_time - patient.arrival_time
+
+        self.record_result(patient.id, "Blood Lab Service Time", lab_duration)
+        self.record_result(patient.id, "Arrival to Bloods Reported", total_test_time)
+        print(f"[{self.env.now:.2f}] Patient {patient.id} lab results available.")
+    
     # Simulate ED assessment process
 
     def ed_assessment(self, patient):
@@ -810,73 +853,107 @@ class Model:
             print(f"Patient {patient.id} arrival to assessment {wait_time}")
             print(f"Patient {patient.id} starts ED assessment at {ed_assessment_start_time}")
           
-            # Sample total assessment time based on disposition
-            if patient.ed_disposition == "Discharge":
-                total_ed_assessment_time = max(np.random.lognormal(
-                    mean=self.global_params.mu_ed_assessment_discharge,
-                    sigma=self.global_params.sigma_ed_assessment_discharge), 
-                    self.global_params.min_ed_service_time)
-            elif patient.ed_disposition in ["Refer - Medicine", "Refer - Speciality", "Refer - Paeds"]:
-                total_ed_assessment_time = max(
-                    np.random.weibull(self.global_params.wb_shape_ed_assessment_admit) * 
-                    self.global_params.wb_scale_ed_assessment_admit,
-                    self.global_params.min_ed_service_time
-                )    
-
-
-            # Sample how long doctor is needed (can’t exceed total time)
-            raw_service_time = np.random.lognormal(
-                    mean=self.global_params.mu_ed_service_time,
-                    sigma=self.global_params.sigma_ed_service_time
-                )
-            ed_service_time = min(
-                max(raw_service_time, self.global_params.min_ed_service_time), 
-                self.global_params.max_ed_service_time,
-                total_ed_assessment_time
+    
+            # Step 1: Draw base time from lognormal (fitted from R)
+            base_service_time = np.random.lognormal(
+                mean=self.global_params.mu_ed_service_time,  
+                sigma=self.global_params.sigma_ed_service_time 
             )
+
+            # Step 2: Lookup scaling factor from GAM model using admission probability
+            scaling_factor = np.interp(
+                patient.admission_probability,
+                self.ed_service_time_scaling_factor_data["admission_probability"],
+                self.ed_service_time_scaling_factor_data["scaling_factor"]
+            )
+
+            # Step 3: Scale the sampled time
+            ed_service_time = base_service_time * scaling_factor
+
+            # Step 4: Enforce a minimum service time
+            ed_service_time = max(ed_service_time, self.global_params.min_ed_service_time)
 
             # Doctor is held only for service time
             yield self.env.timeout(ed_service_time)
             self.record_result(patient.id, "ED Assessment Service Time", ed_service_time)
-            
 
-        remaining_time = max(0, total_ed_assessment_time - ed_service_time)
-        yield self.env.timeout(remaining_time)
-        print(f"Patient {patient.id} spends {total_ed_assessment_time:.1f} minutes being assessed in ED")
-        self.record_result(patient.id, "ED Assessment Time Total", total_ed_assessment_time)
-        self.record_result(patient.id, "ED Assessment to Decision", remaining_time)
 
         # Routing logic
-        ed_outcome = patient.ed_disposition
-        print(f"Patient {patient.id} ED outcome (predefined): {ed_outcome}")
-
-        if ed_outcome == "Discharge":
-            patient.discharge_time = self.env.now
-            time_in_system = patient.discharge_time - patient.arrival_time
-            self.record_result(patient.id, "Discharge Decision Point", "ed_discharge")
-            self.record_result(patient.id, "Time in System", time_in_system)
-            self.record_event(patient, "discharge")
-            print(f"Patient {patient.id} discharged from ED at {patient.discharge_time}")
-            return
-
-        elif ed_outcome == "Refer - Speciality":
-            pseudo_departure_time = self.env.now
-            time_in_system = pseudo_departure_time - patient.arrival_time
-            self.record_result(patient.id, "Discharge Decision Point", "ed_referred_other_specialty_pseudo_exit")
-            self.record_result(patient.id, "Time in System", time_in_system)
-            self.record_event(patient, "referral_to_speciality")
-            print(f"Patient {patient.id} referred to other specialty at {pseudo_departure_time}")
-            return
-
-        elif ed_outcome == "Refer - Medicine":
-            patient.referral_to_medicine_time = self.env.now
-            total_time_referral = self.env.now - patient.arrival_time
-            self.record_result(patient.id, "Arrival to Referral", total_time_referral)
-            self.record_event(patient, "referral_to_medicine")
-            print(f"Patient {patient.id} referred to medicine at {patient.referral_to_medicine_time}")
-            yield self.env.process(self.handle_ed_referral(patient))
+       
+        if not patient.adult:
             
+            # --- Paediatric logic ---
 
+            paeds_admit_probability = self.global_params.paediatric_referral_rate
+            
+            admitted = random.random() < paeds_admit_probability
+
+            if admitted:
+                patient.ed_disposition = "Refer - Paeds"
+            else:
+                patient.ed_disposition = "Discharge"
+
+        else:
+
+            # --- Adult logic ---
+            
+            admitted = random.random() < patient.admission_probability
+
+            if not admitted:
+                patient.ed_disposition = "Discharge"
+
+            else:
+                patient.ed_disposition = random.choices(
+                    ["Refer - Medicine", "Refer - Other Speciality"],
+                    weights=[
+                        self.global_params.medical_referral_rate,
+                        1 - self.global_params.medical_referral_rate
+                    ],
+                    k=1
+                )[0]
+
+            ed_outcome = patient.ed_disposition
+
+
+            # Optional: record disposition and time (useful for debugging or analysis)
+            self.record_result(patient.id, "ED Disposition", ed_outcome)
+
+
+            if ed_outcome == "Discharge":
+                patient.discharge_time = self.env.now
+                time_in_system = patient.discharge_time - patient.arrival_time
+                self.record_result(patient.id, "Discharge Decision Point", "ed_discharge")
+                self.record_result(patient.id, "Time in System", time_in_system)
+                self.record_event(patient, "discharge")
+                print(f"Patient {patient.id} discharged from ED at {patient.discharge_time}")
+                return
+
+            elif ed_outcome == "Refer - Other Speciality":
+                pseudo_departure_time = self.env.now
+                time_in_system = pseudo_departure_time - patient.arrival_time
+                self.record_result(patient.id, "Discharge Decision Point", "ed_referred_other_specialty_pseudo_exit")
+                self.record_result(patient.id, "Time in System", time_in_system)
+                self.record_event(patient, "referral_to_speciality")
+                print(f"Patient {patient.id} referred to other specialty at {pseudo_departure_time}")
+                return
+
+            elif ed_outcome == "Refer - Paeds":
+                pseudo_departure_time = self.env.now
+                time_in_system = pseudo_departure_time - patient.arrival_time
+                self.record_result(patient.id, "Discharge Decision Point", "ed_referred_paeds_pseudo_exit")
+                self.record_result(patient.id, "Time in System", time_in_system)
+                self.record_event(patient, "referral_to_paeds")
+                print(f"Patient {patient.id} referred to paediatrics at {pseudo_departure_time}")
+                return
+
+            elif ed_outcome == "Refer - Medicine":
+                patient.referral_to_medicine_time = self.env.now
+                total_time_referral = patient.referral_to_medicine_time - patient.arrival_time
+                self.record_result(patient.id, "Arrival to Referral", total_time_referral)
+                self.record_event(patient, "referral_to_medicine")
+                print(f"Patient {patient.id} referred to medicine at {patient.referral_to_medicine_time}")
+                yield self.env.process(self.handle_ed_referral(patient))
+            
     def handle_ed_referral(self, patient):
         """Handles referral after ED assessment when SDEC is rejected.
         Ensures patient is referred to AMU queue while also starting medical assessment."""

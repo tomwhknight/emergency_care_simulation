@@ -1,6 +1,6 @@
 class Patient:
     """Class representing a patient in the system."""
-    def __init__(self, patient_id, arrival_time, current_day, clock_hour, current_hour, source_of_referral, mode_arrival, age, adult, news2, admission_prob, acuity, sdec_appropriate, ed_disposition, priority = 1):
+    def __init__(self, patient_id, arrival_time, current_day, clock_hour, current_hour, source_of_referral, mode_arrival, age, adult, news2, admission_probability, acuity, sdec_appropriate, ed_disposition, has_bloods, priority = 1):
         self.id = patient_id
         self.arrival_time = arrival_time
         self.current_day = current_day 
@@ -14,10 +14,11 @@ class Patient:
         self.age = age
         self.adult = adult
         self.news2 = news2
-        self.admission_prob = admission_prob
+        self.admission_probability = admission_probability
         self.acuity = acuity 
         self.sdec_appropriate = sdec_appropriate
         self.ed_disposition = ed_disposition
+        self.has_bloods = has_bloods
         self.priority = priority
 
         # Track outcomes
