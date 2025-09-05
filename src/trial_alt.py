@@ -68,8 +68,8 @@ class AltTrial:
             os.makedirs('results')
 
        # Save files under clearly labelled filenames
-        self.agg_results_df.to_csv(os.path.join('data', 'results', 'results_from_alt_model.csv'), index=False)
-        print("Saved: results_from_alt_model.csv")
+        self.agg_results_df.to_csv(os.path.join('data', 'results', 'results_from_alt_model_ohh.csv'), index=False)
+        print("Saved: results_from_alt_model_ohh.csv")
 
         # Save event log
         event_log_path = os.path.join('data', 'results', 'event_log_from_alt_model.csv')

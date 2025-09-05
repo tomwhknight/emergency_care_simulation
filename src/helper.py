@@ -1,4 +1,8 @@
 # helper.py
+
+import pandas as pd
+from collections import defaultdict
+import os
 import datetime
 import numpy as np
 import math
@@ -70,3 +74,90 @@ class Lognormal:
     def audit_utilisation(self, activity_attribute, resource_attribute):
         activity_durations = [getattr(i, activity_attribute) for i in self.patient_objects]
         return sum(activity_durations) / (g.getattr(resource_attribute) * g.sim_duration)
+    
+
+    # Rota math
+
+    # --- Rota capacity helpers ---
+
+def _hhmm_to_min(s: str) -> int:
+    hh, mm = map(int, s.split(":"))
+    return hh * 60 + mm
+
+def _is_active(start_min: int, end_min: int, m: int) -> bool:
+    """Supports overnight shifts (e.g., 22:00 → 08:00)."""
+    if start_min < end_min:
+        return start_min <= m < end_min
+    else:
+        return m >= start_min or m < end_min
+
+def rota_peak(shift_patterns, roles=None) -> int:
+    """
+    Return peak simultaneous headcount across the day.
+    - shift_patterns: list of dicts with keys: start, end, count, role
+    - roles: optional set of roles to include (e.g., {"tier_1","tier_2"})
+    """
+    # optionally filter roles
+    if roles is not None:
+        shift_patterns = [s for s in shift_patterns if s.get("role") in roles]
+
+    peak = 0
+    for m in range(1440):  # every minute of the day
+        total = 0
+        for sh in shift_patterns:
+            start = _hhmm_to_min(sh["start"])
+            end   = _hhmm_to_min(sh["end"])
+            cnt   = int(sh.get("count", 0))
+            if _is_active(start, end, m):
+                total += cnt
+        peak = max(peak, total)
+    return peak
+
+
+def time_to_minutes(hhmm: str) -> int:
+    h, m = map(int, hhmm.split(":"))
+    return h * 60 + m
+
+def on_shift_at(mins_in_day: int, start_str: str, end_str: str) -> bool:
+    start = time_to_minutes(start_str)
+    end = time_to_minutes(end_str)
+    if start < end:
+        return start <= mins_in_day < end
+    else:
+        # Overnight shift (e.g. 22:00 → 07:30)
+        return mins_in_day >= start or mins_in_day < end
+
+def staff_by_hour(shift_patterns):
+    hours = list(range(24))
+    totals = []
+    by_role = defaultdict(list)
+    roles = sorted(set(s["role"] for s in shift_patterns))
+
+    for H in hours:
+        t = H * 60
+        total_here = 0
+        counts_here = {role: 0 for role in roles}
+        for s in shift_patterns:
+            if on_shift_at(t, s["start"], s["end"]):
+                total_here += s["count"]
+                counts_here[s["role"]] += s["count"]
+        totals.append(total_here)
+        for role in roles:
+            by_role[role].append(counts_here[role])
+
+    return hours, totals, by_role
+
+def rota_to_dataframe(shift_patterns):
+    hours, totals, by_role = staff_by_hour(shift_patterns)
+    df = pd.DataFrame({"Hour": hours, "Total": totals})
+    for role, counts in by_role.items():
+        df[role] = counts
+    return df
+
+def save_rota_check(shift_patterns, output_dir, filename="rota_check.csv"):
+    """Save rota sanity check table to a CSV in the given output directory."""
+    df = rota_to_dataframe(shift_patterns)
+    os.makedirs(output_dir, exist_ok=True)  # make sure dir exists
+    filepath = os.path.join(output_dir, filename)
+    df.to_csv(filepath, index=False)
+    return filepath

@@ -35,9 +35,6 @@ class Model:
         
         self.blood_draw_time_distribution = Lognormal(mean=self.global_params.mean_blood_draw_time,
                                                   stdev=self.global_params.stdev_blood_draw_time)
-        
-        self.blood_lab_time_distribution = Lognormal(mean=self.global_params.mean_blood_lab_time,
-                                                  stdev=self.global_params.stdev_blood_lab_time)
 
         self.consultant_time_distribution = Lognormal(mean=self.global_params.mean_consultant_assessment_time, 
                                                    stdev=self.global_params.stdev_consultant_assessment_time)
@@ -62,8 +59,6 @@ class Model:
             "Source of Referral",
             "Mode of Arrival",
             "Acuity",
-            "Admission Probability"
-            "Has Bloods",
             "ED Disposition",
             
 
@@ -82,23 +77,18 @@ class Model:
             # --- Tests ---
 
             "Bloods Requested",
-            "Bloods Requested at Triage",
-            "Bloods Requested after Triage",
-
             "Queue Length Bloods",
             "Request to Bloods Obtained",
-            "Arrival to Bloods Obtained"
-            "Arrival to Bloods Reported"
+            "Arrival to Bloods Obtained",
+            "Arrival to Bloods Reported",
             "Blood Draw Service Time",
-            "Bloods Lab Service Time",
+            "Blood Lab Service Time",
 
             # --- ED assessment ---
 
             "Queue Length ED doctor",
             "Arrival to ED Assessment",
-            "ED Assessment Time Total",
             "ED Assessment Service Time",
-            "ED Assessment to Decision",
             
     
             # --- Referral to Medicine ---
@@ -135,7 +125,10 @@ class Model:
 
          # Create an event log DataFrame with structured standard columns
         self.event_log_df = pd.DataFrame(columns=["run_number", "patient_id", "event", "timestamp"])
-        
+
+        # Initialize DataFrame to monitor ed assessment queue
+        self.ed_assessment_queue_monitoring_df = pd.DataFrame(columns=['Simulation Time', 'Hour of Day', 'Queue Length'])
+
         # Initialize DataFrame to monitor consultant queue
         self.consultant_queue_monitoring_df = pd.DataFrame(columns=['Simulation Time', 'Hour of Day', 'Queue Length'])
    
@@ -146,7 +139,7 @@ class Model:
         self.ambulance_triage_nurse = simpy.Resource(self.env, capacity=self.global_params.ambulance_triage_nurse_capacity)
         self.walk_in_triage_nurse = simpy.PriorityResource(self.env, capacity = self.global_params.walk_in_triage_nurse_capacity)
         self.hca = simpy.PriorityResource(self.env, capacity = self.global_params.hca_capacity)
-        self.ed_doctor = simpy.PriorityResource(self.env, capacity=self.global_params.ed_doctor_capacity)
+        self.ed_doctor = simpy.PriorityResource(self.env, capacity=self.global_params.max_ed_capacity)
         self.medical_doctor = simpy.PriorityResource(self.env, capacity=self.global_params.medical_doctor_capacity)
         self.consultant = simpy.PriorityResource(self.env, capacity=self.global_params.consultant_capacity)
 
@@ -239,8 +232,8 @@ class Model:
             source_of_referral = random.choices(
                 ["GP", "ED"],
             weights=[
-                self.global_params.proportion_direct_primary_care,       # 0.07
-                1 - self.global_params.proportion_direct_primary_care    # 0.93
+                self.global_params.proportion_direct_primary_care,       
+                1 - self.global_params.proportion_direct_primary_care
                 ]
             )[0]
 
@@ -249,14 +242,14 @@ class Model:
             weights = self.admission_probability_distribution_data["weight"].values
             admission_probability = np.random.choice(admission_probs, p=weights)
 
-
-
-            # SDEC appropriate
-
+           # SDEC appropriate
             if adult:
-                sdec_appropriate = random.random() < self.global_params.sdec_appropriate_rate
+                if (acuity not in [1, 2]) and (news2 < 4) and (admission_probability < 0.5):
+                    sdec_appropriate = True
+                else:
+                    sdec_appropriate = False
             else:
-                sdec_appropriate = np.nan
+                sdec_appropriate = False
                         
             # Assign priority level
 
@@ -265,31 +258,27 @@ class Model:
             else:
                 priority = 1  # Lower priority
 
-            # Placeholders
-
-            ed_disposition = None
-            has_bloods = False
-
+        
             # Create instance of patient class
             
             patient = Patient(
-            self.patient_counter,
-            arrival_time,
-            current_day,
-            clock_hour,
-            current_hour,
-            source_of_referral,
-            mode_of_arrival,
-            age,
-            adult,
-            news2,
-            admission_probability,
-            acuity,
-            sdec_appropriate,
-            ed_disposition,
-            has_bloods, 
-            priority
-            )
+                env=self.env,
+                patient_id=patient_id,
+                arrival_time=arrival_time,
+                current_day=current_day,
+                clock_hour=clock_hour,
+                current_hour=current_hour,
+                source_of_referral=source_of_referral,
+                mode_arrival= mode_of_arrival,
+                age=age,
+                adult=adult,
+                news2=news2,
+                admission_probability=admission_probability,
+                acuity=acuity,
+                sdec_appropriate=sdec_appropriate,
+                ed_disposition=None,
+                priority=priority
+                )
 
             # Initialise a dictionary of patient results 
 
@@ -306,7 +295,7 @@ class Model:
             "NEWS2": news2,
             "Source of Referral": source_of_referral,
             "Acuity": acuity,
-            "Admission Probabiliy": admission_probability, 
+            "Admission Probability": admission_probability, 
 
             # --- Triage-Related Metrics ---
             "Queue Length Walk in Triage Nurse": np.nan,
@@ -322,12 +311,6 @@ class Model:
             # --- Test related metrics ---
 
             "Bloods Requested": "",
-            "Bloods Requested at Triage": "",
-            "Bloods Requested after Triage": "",
-
-            "Queue Length Bloods": np.nan,
-            "Request to Bloods Obtained": np.nan,
-            "Arrival to Bloods Obtained": np.nan,
             "Arrival to Bloods Reported": np.nan,
             "Blood Draw Service Time": np.nan,
             "Bloods Lab Service Time": np.nan, 
@@ -335,9 +318,7 @@ class Model:
             # --- ED Assessment Metrics ---
             "Queue Length ED doctor": np.nan,
             "Arrival to ED Assessment": np.nan,
-            "ED Assessment Time Total": np.nan,
             "ED Assessment Service Time": np.nan,
-            "ED Assessment to Decision": np.nan,
             "ED Disposition": "",
 
             # --- Referral to Medicine ---
@@ -501,6 +482,40 @@ class Model:
                     yield self.env.timeout(60) 
 
     # Method to monitor the consultant queue
+    def monitor_ed_assessment_queue_length(self, interval=60):
+        """Monitor consultant queue length at regular intervals."""
+        while True:
+        # Record the current time and queue length
+            current_time = self.env.now
+            queue_length = len(self.ed_doctor.queue)
+            hour_of_day = (current_time // 60) % 24
+        
+            # Print the current queue status for debugging
+            print(f"[{self.env.now:.2f}] Monitoring ED Assesment Queue: {queue_length} patients waiting at hour {hour_of_day}")
+
+        # Check if there are any patients currently in the queue
+            if queue_length > 0:
+                print(f"ED Assessment Queue Status: {queue_length} patients are still in the queue.")
+                # Print patient IDs currently in the queue
+                patient_ids = [req.priority for req in self.ed_doctor.queue]
+                print(f"Patients in ED Assessment Queue: {patient_ids}")
+            else:
+                print("ED Assessment Queue Status: Queue is empty.")
+
+            # Create a new DataFrame for the current row
+            new_row = pd.DataFrame({
+                'Simulation Time': [current_time],
+                'Hour of Day': [hour_of_day],
+                'Queue Length': [queue_length]
+            })
+
+            # Concatenate the new row with the existing DataFrame
+            self.ed_assessment_queue_monitoring_df = pd.concat([self.ed_assessment_queue_monitoring_df, new_row], ignore_index=True)
+        
+            # Wait for the specified interval before checking again
+            yield self.env.timeout(interval)
+
+    # Method to monitor the consultant queue
     def monitor_consultant_queue_length(self, interval=60):
         """Monitor consultant queue length at regular intervals."""
         while True:
@@ -564,7 +579,6 @@ class Model:
 
             # Check if the current time is within the off-duty period (21:00–07:00)
             if current_hour >= 22 or current_hour < 12:
-                print(f"{self.env.now:.2f}: Consultants are off-duty (21:00–07:00).")
                 with self.walk_in_triage_nurse.request(priority=-1) as req:
                     yield req  # Block the resource
                     yield self.env.timeout(60)  # Hold the block for 1 hour
@@ -574,40 +588,59 @@ class Model:
             # Wait until the next hour to check again
             yield self.env.timeout(60)
 
-    # Method to model ED doctor working hours
-    def obstruct_ed_doctor(self):
-        """Simulate ED doctor unavailability based on shift patterns."""
-        while True:
-            # Extract the current hour
-            current_hour = extract_hour(self.env.now)
+    def get_available_doctors(self, current_time_minutes):
+        """
+        Calculate how many doctors are available based on current simulation time 
+        and shift patterns stored in self.global_params.shift_patterns.
         
-            # Get the number of doctors available for the current hour
-            available_doctors = self.ed_staffing_data.loc[
-            self.ed_staffing_data['hour'] == current_hour, 'num_staff'
-            ].values[0]
-            print(f"Number of doctors available at hour {current_hour}: {available_doctors}")
+        Args:
+            current_time_minutes (float): Simulation time in minutes.
+            
+        Returns:
+            int: Number of doctors available at the current time.
+        """
+        minutes_today = int(current_time_minutes % (24 * 60))
+        current_hour = minutes_today // 60
+        current_minute = minutes_today % 60
+        current_time_str = f"{current_hour:02d}:{current_minute:02d}"
 
-            # Calculate the number of doctors to block
-            ed_doctors_to_block = self.ed_doctor.capacity - available_doctors
-           
-            # Block excess doctors
-            if ed_doctors_to_block > 0:
-                print(f"{self.env.now:.2f}: Blocking {ed_doctors_to_block} ED doctors for hour {current_hour}.")
-                for _ in range(ed_doctors_to_block):
-                    self.env.process(self.block_doctor(60))  # Block each doctor for 1 hour
+        available_count = 0
+
+        for shift in self.global_params.shift_patterns:
+            start = shift["start"]
+            end = shift["end"]
+
+            if start < end:
+                # Normal shift within same day
+                if start <= current_time_str < end:
+                    available_count += shift["count"]
             else:
-                print(f"{self.env.now:.2f}: No blocking required; all doctors available.")
+                # Overnight shift (e.g., 22:00 → 08:00)
+                if current_time_str >= start or current_time_str < end:
+                    available_count += shift["count"]
 
-            # Wait for the next hour to recheck staffing
-            yield self.env.timeout(60)
+        return available_count
 
-    # Method to block ED doctor 
+    def obstruct_ed_doctor(self):
+        while True:
+            desired = self.get_available_doctors(self.env.now)
+            excess = self.ed_doctor.capacity - desired
+
+            print(f"[{int(self.env.now)}] desired={desired} in_use={len(self.ed_doctor.users)} cap={self.ed_doctor.capacity}")
+
+            if excess > 0:
+                for _ in range(excess):
+                    self.env.process(self.block_doctor(15))  # block for exactly 60 min
+
+            yield self.env.timeout(15)  # check exactly at rota change points
+
     def block_doctor(self, block_duration):
-        """Simulate blocking a single doctor for a specific duration."""
+        """Occupy one doctor slot for the block_duration."""
         with self.ed_doctor.request(priority=-1) as req:
-            yield req  # Acquire the resource to simulate it being blocked   
-            yield self.env.timeout(block_duration)  # Simulate the blocking period
-
+            req.is_block = True     # <- tag
+            yield req
+            yield self.env.timeout(block_duration)
+  
     # Method to replicate doctor breaks
     def doctor_break_cycle(self):
         """Randomly select a proportion of the currently available ED doctors for a 30-minute break every hour."""
@@ -615,23 +648,19 @@ class Model:
             # Step 1: Wait for the next break cycle (every 60 minutes)
             yield self.env.timeout(60)
 
-            # Step 2: Get the current simulation hour
-            current_hour = int(self.env.now // 60) % 24  # Convert simulation time (mins) to hour of the day
+            # Step 2: Get number of doctors currently available (shift-adjusted)
+            available_doctors = self.get_available_doctors(self.env.now)
+            print(f"{self.env.now:.2f}: Doctors on shift: {available_doctors}")
 
-            # Step 3: Get the number of doctors currently available (shift-adjusted)
-            available_doctors = self.ed_staffing_data.loc[
-                self.ed_staffing_data['hour'] == current_hour, 'num_staff'
-                ].values[0]  # Lookup the correct number of doctors on shift
+            # Step 3: Determine how many doctors to send on break (20% of available doctors)
+            num_on_break = max(1, int(0.2 * available_doctors))  # At least 1 doctor
+            print(f"{self.env.now:.2f}: Sending {num_on_break} doctor(s) on break.")
 
-            print(f"{self.env.now:.2f}: Doctors on shift at hour {current_hour}: {available_doctors}")
-
-            # Step 4: Determine how many doctors to send on break (16% of available doctors)
-            num_on_break = max(1, int(0.2 * available_doctors))  # Ensure at least 1 doctor takes a break
-
-            # Step 5: Randomly select doctors to take a break
+            # Step 4: Randomly select doctors to take a break
             for _ in range(num_on_break):
-                with self.ed_doctor.request(priority=-1) as break_req:  # Priority to override patient requests
-                    yield break_req  # Wait until doctor is free
+                with self.ed_doctor.request(priority=-1) as break_req:  # Priority override
+                    break_req.is_block = True     # <- tag
+                    yield break_req
                     print(f"{self.env.now:.2f}: A doctor goes on a 30-min break.")
                     yield self.env.timeout(30)  # Break duration
                     print(f"{self.env.now:.2f}: Doctor returns from break.")
@@ -693,7 +722,7 @@ class Model:
         """Simulate process of referral to SDEC"""
 
         if not patient.adult:
-            self.record_result(patient.id, "SDEC Accepted", np.nan)
+            self.record_result(patient.id, "SDEC Accepted", False)
             self.record_result(patient.id, "SDEC Decision Reason", "Rejected: Paediatric")
             yield self.env.process(fallback_process(patient))
             return
@@ -716,8 +745,14 @@ class Model:
         # Check capacity
         if len(self.sdec_capacity.items) > 0:
             yield self.sdec_capacity.get()  # Take slot immediately
+
             self.record_result(patient.id, "SDEC Accepted", True)
             self.record_result(patient.id, "SDEC Decision Reason", "Accepted")
+
+            patient.ed_disposition = "SDEC Accepted"
+            self.record_result(patient.id, "ED Disposition", "SDEC Accepted")
+
+
             self.record_result(patient.id, "Discharge Decision Point", "after_sdec_acceptance")
             self.record_event(patient, "sdec_acceptance")
             patient.discharged = True
@@ -759,6 +794,22 @@ class Model:
             self.record_result(patient.id, "Triage Nurse Assessment Service Time", triage_nurse_assessment_time)
             patient.triage_nurse_assessment_time = triage_nurse_assessment_time 
 
+            # Decide if blood tests are needed based on admission probability  
+
+            if random.random() < self.global_params.bloods_request_probability:
+
+                self.record_result(patient.id, "Bloods Requested", "Yes")
+                self.record_result(patient.id, "Bloods Requested at Triage", "Yes")
+                yield self.env.process(self.tests_draw(patient))
+                patient.bloods_requested = True
+                patient.bloods_requested_at_triage = True
+            else:
+                self.record_result(patient.id, "Bloods Requested", "No")
+                self.record_result(patient.id, "Bloods Requested at Triage", "No")
+                patient.bloods_requested = False
+                patient.bloods_requested_at_triage = False
+
+
          # After triage, proceed to SDEC referral process (with ED assessment as fallback)
         yield self.env.process(self.refer_to_sdec(patient, fallback_process = self.ed_assessment))
 
@@ -784,18 +835,19 @@ class Model:
             self.record_result(patient.id, "Triage Nurse Assessment Service Time", triage_nurse_assessment_time)
             patient.triage_nurse_assessment_time = triage_nurse_assessment_time 
 
-            # Decide if blood tests are needed based on admission probability
-            
+            # Decide if blood tests are needed based on admission probability   
             if random.random() < self.global_params.bloods_request_probability:
 
                 self.record_result(patient.id, "Bloods Requested", "Yes")
                 self.record_result(patient.id, "Bloods Requested at Triage", "Yes")
                 yield self.env.process(self.tests_draw(patient))
-                patient.had_bloods = True
+                patient.bloods_requested = True
+                patient.bloods_requested_at_triage = True
             else:
                 self.record_result(patient.id, "Bloods Requested", "No")
                 self.record_result(patient.id, "Bloods Requested at Triage", "No")
-                patient.had_bloods = False
+                patient.bloods_requested = False
+                patient.bloods_requested_at_triage = False
 
         # After triage, proceed ED assessment
         yield self.env.process(self.refer_to_sdec(patient, fallback_process = self.ed_assessment))
@@ -805,20 +857,18 @@ class Model:
         """Simulate an HCA drawing tests after triage."""
         with self.hca.request() as req:
             self.record_result(patient.id, "Queue Length Bloods", len(self.hca.queue))
-            blood_start_wait = self.env.now
             yield req
             
             # Sample test draw duration
             blood_draw_duration = self.blood_draw_time_distribution.sample()
             yield self.env.timeout(blood_draw_duration)
             
-            bloods_obtained = self.env.now
-            request_to_obtained = bloods_obtained - blood_start_wait
-            arrival_to_obtained = bloods_obtained - patient.arrival_time    
+            time_bloods_obtained = self.env.now
+            arrival_to_obtained = time_bloods_obtained - patient.arrival_time    
 
-            self.record_result(patient.id, "Arrival to Bloods Obtained", arrival_to_obtained)
-            self.record_result(patient.id, "Request to Bloods Obtained", request_to_obtained)
             self.record_result(patient.id, "Blood Draw Service Time", blood_draw_duration)
+            self.record_result(patient.id, "Arrival to Bloods Obtained", arrival_to_obtained)
+            
             print(f"[{self.env.now:.2f}] Patient {patient.id} Blood test draw complete.")
 
         # After draw, proceed to lab processing
@@ -826,134 +876,122 @@ class Model:
 
     def tests_lab(self, patient):
         """Simulate lab processing time for test results."""
-        lab_duration = self.blood_lab_time_distribution.sample()
+        lab_duration = np.random.lognormal(
+                mean=self.global_params.mu_blood_lab_time,
+                sigma=self.global_params.sigma_blood_lab_time
+            )
+        
         yield self.env.timeout(lab_duration)
+        
         blood_complete_time = self.env.now
-        total_test_time = blood_complete_time - patient.arrival_time
+        patient.bloods_ready_time = blood_complete_time 
 
+        total_test_time = blood_complete_time - patient.arrival_time
         self.record_result(patient.id, "Blood Lab Service Time", lab_duration)
         self.record_result(patient.id, "Arrival to Bloods Reported", total_test_time)
         print(f"[{self.env.now:.2f}] Patient {patient.id} lab results available.")
+
+        if not patient.bloods_ready.triggered:
+            patient.bloods_ready.succeed()
     
     # Simulate ED assessment process
 
     def ed_assessment(self, patient):
-        """Simulate ED assessment."""
+        """Simulate ED assessment, including possible wait for blood results and results review."""
+
+        def finalise_disposition(patient, decision_point, event_name):
+            patient.discharge_time = self.env.now
+            time_in_system = patient.discharge_time - patient.arrival_time
+            self.record_result(patient.id, "Discharge Decision Point", decision_point)
+            self.record_result(patient.id, "Time in System", time_in_system)
+            self.record_event(patient, event_name)
+
+        # --- Initial assessment ---
         with self.ed_doctor.request(priority=patient.priority) as req:
-            print(f"Patient {patient.id} ED Doctor Queue at time of request: {len(self.ed_doctor.queue)} patients at time {self.env.now}")
-            self.record_result(patient.id, "Queue Length ED doctor", len(self.ed_doctor.queue))
+            q_patients = sum(1 for r in self.ed_doctor.queue if not getattr(r, "is_block", False))
+            print(f"Patient {patient.id} ED Doctor Queue at time of request: "
+                f"{q_patients} patients at time {self.env.now}")
+            self.record_result(patient.id, "Queue Length ED doctor", q_patients)
             yield req
-            
-            # Assessment starts once doctor is available
+
             ed_assessment_start_time = self.env.now
             wait_time = ed_assessment_start_time - patient.arrival_time
             self.record_result(patient.id, "Arrival to ED Assessment", wait_time)
             self.record_event(patient, "ed_assessment_start")
-            print(f"[{self.env.now:.2f}] Doctor in use count: {self.ed_doctor.count} / {self.ed_doctor.capacity}")
-            print(f"Patient {patient.id} arrival to assessment {wait_time}")
-            print(f"Patient {patient.id} starts ED assessment at {ed_assessment_start_time}")
-          
-    
-            # Step 1: Draw base time from lognormal (fitted from R)
-            base_service_time = np.random.lognormal(
-                mean=self.global_params.mu_ed_service_time,  
-                sigma=self.global_params.sigma_ed_service_time 
-            )
 
-            # Step 2: Lookup scaling factor from GAM model using admission probability
+            # Draw and scale service time
+            base_service_time = np.random.lognormal(
+                mean=self.global_params.mu_ed_service_time,
+                sigma=self.global_params.sigma_ed_service_time
+            )
             scaling_factor = np.interp(
                 patient.admission_probability,
                 self.ed_service_time_scaling_factor_data["admission_probability"],
                 self.ed_service_time_scaling_factor_data["scaling_factor"]
             )
-
-            # Step 3: Scale the sampled time
             ed_service_time = base_service_time * scaling_factor
-
-            # Step 4: Enforce a minimum service time
-            ed_service_time = max(ed_service_time, self.global_params.min_ed_service_time)
-
-            # Doctor is held only for service time
+            ed_service_time = min(
+                max(ed_service_time, self.global_params.min_ed_service_time),
+                self.global_params.max_ed_service_time
+            )
             yield self.env.timeout(ed_service_time)
+
+            # Record assessment end time
             self.record_result(patient.id, "ED Assessment Service Time", ed_service_time)
 
-
-        # Routing logic
-       
+        # --- Disposition logic ---
         if not patient.adult:
-            
-            # --- Paediatric logic ---
-
-            paeds_admit_probability = self.global_params.paediatric_referral_rate
-            
-            admitted = random.random() < paeds_admit_probability
-
+            admitted = random.random() < self.global_params.paediatric_referral_rate
             if admitted:
                 patient.ed_disposition = "Refer - Paeds"
             else:
+                # Paediatric discharge → must wait for bloods
+                if patient.bloods_ready_time > self.env.now:
+                    wait_time = patient.bloods_ready_time - self.env.now
+                    yield self.env.timeout(wait_time)
+                    print(f"[{self.env.now:.2f}] Patient {patient.id} blood results available.")
                 patient.ed_disposition = "Discharge"
 
         else:
-
-            # --- Adult logic ---
-            
             admitted = random.random() < patient.admission_probability
-
             if not admitted:
+            # Adult discharge → must wait for bloods
+                if patient.bloods_ready_time > self.env.now:
+                    wait_time = patient.bloods_ready_time - self.env.now
+                    yield self.env.timeout(wait_time)
+                    print(f"[{self.env.now:.2f}] Patient {patient.id} blood results available.")
                 patient.ed_disposition = "Discharge"
-
             else:
                 patient.ed_disposition = random.choices(
-                    ["Refer - Medicine", "Refer - Other Speciality"],
-                    weights=[
-                        self.global_params.medical_referral_rate,
-                        1 - self.global_params.medical_referral_rate
-                    ],
+                        ["Refer - Medicine", "Refer - Other Speciality"],
+                    weights=[self.global_params.medical_referral_rate,
+                            1 - self.global_params.medical_referral_rate],
                     k=1
                 )[0]
 
-            ed_outcome = patient.ed_disposition
+        self.record_result(patient.id, "ED Disposition", patient.ed_disposition)
 
+        # --- Handle outcome ---
+        outcome = patient.ed_disposition
+        if outcome == "Discharge":
+            finalise_disposition(patient, "ed_discharge", "discharge")
+            return
 
-            # Optional: record disposition and time (useful for debugging or analysis)
-            self.record_result(patient.id, "ED Disposition", ed_outcome)
+        elif outcome == "Refer - Other Speciality":
+            finalise_disposition(patient, "ed_referred_other_specialty_pseudo_exit", "referral_to_speciality")
+            return
 
+        elif outcome == "Refer - Paeds":
+            finalise_disposition(patient, "ed_referred_paeds_pseudo_exit", "referral_to_paeds")
+            return
 
-            if ed_outcome == "Discharge":
-                patient.discharge_time = self.env.now
-                time_in_system = patient.discharge_time - patient.arrival_time
-                self.record_result(patient.id, "Discharge Decision Point", "ed_discharge")
-                self.record_result(patient.id, "Time in System", time_in_system)
-                self.record_event(patient, "discharge")
-                print(f"Patient {patient.id} discharged from ED at {patient.discharge_time}")
-                return
-
-            elif ed_outcome == "Refer - Other Speciality":
-                pseudo_departure_time = self.env.now
-                time_in_system = pseudo_departure_time - patient.arrival_time
-                self.record_result(patient.id, "Discharge Decision Point", "ed_referred_other_specialty_pseudo_exit")
-                self.record_result(patient.id, "Time in System", time_in_system)
-                self.record_event(patient, "referral_to_speciality")
-                print(f"Patient {patient.id} referred to other specialty at {pseudo_departure_time}")
-                return
-
-            elif ed_outcome == "Refer - Paeds":
-                pseudo_departure_time = self.env.now
-                time_in_system = pseudo_departure_time - patient.arrival_time
-                self.record_result(patient.id, "Discharge Decision Point", "ed_referred_paeds_pseudo_exit")
-                self.record_result(patient.id, "Time in System", time_in_system)
-                self.record_event(patient, "referral_to_paeds")
-                print(f"Patient {patient.id} referred to paediatrics at {pseudo_departure_time}")
-                return
-
-            elif ed_outcome == "Refer - Medicine":
-                patient.referral_to_medicine_time = self.env.now
-                total_time_referral = patient.referral_to_medicine_time - patient.arrival_time
-                self.record_result(patient.id, "Arrival to Referral", total_time_referral)
-                self.record_event(patient, "referral_to_medicine")
-                print(f"Patient {patient.id} referred to medicine at {patient.referral_to_medicine_time}")
-                yield self.env.process(self.handle_ed_referral(patient))
-            
+        elif outcome == "Refer - Medicine":
+            patient.referral_to_medicine_time = self.env.now
+            total_time_referral = patient.referral_to_medicine_time - patient.arrival_time
+            self.record_result(patient.id, "Arrival to Referral", total_time_referral)
+            self.record_event(patient, "referral_to_medicine")
+            yield self.env.process(self.handle_ed_referral(patient))
+          
     def handle_ed_referral(self, patient):
         """Handles referral after ED assessment when SDEC is rejected.
         Ensures patient is referred to AMU queue while also starting medical assessment."""
@@ -964,50 +1002,57 @@ class Model:
     # Simulate request for AMU bed
 
     def refer_to_amu_bed(self, patient):
-        """Request a bed for the patient if available, or wait for one."""
+        """Request a bed for the patient if available, or exit early if discharged."""
+        # Ensure the discharge event exists (consistent name!)
+        if getattr(patient, "discharge_event", None) is None:
+            patient.discharge_event = self.env.event()
+
+        # Always increment the waiting counter
         self.amu_waiting_counter += 1
         print(f"Patient {patient.id} requesting AMU bed at {self.env.now}, queue size: {self.amu_waiting_counter}")
 
-        while True:
-        
-            # Wait for a bed
-            bed = yield self.amu_beds.get()  
+        # Wait for either a bed OR a discharge
+        bed_get = self.amu_beds.get()
+        result = yield bed_get | patient.discharge_event
 
-            # Check if patient was discharged while waiting
-            if patient.discharged:
-                print(f"Patient {patient.id} discharged while waiting — bed returned.")
-                print(f"AMU Store size before return: {len(self.amu_beds.items)}")
-                self.amu_waiting_counter -= 1
-                print(f"AMU Store size after return: {len(self.amu_beds.items)}")
-                print(f"AMU queue length: {self.amu_waiting_counter}")
-                yield self.amu_beds.put(bed)  # Return bed to the store
-                return
-            
-            # Otherwise, admit the patient to the bed
+        # A) Discharged first → never touch a bed
+        if patient.discharge_event in result and bed_get not in result:
             self.amu_waiting_counter -= 1
-            patient.amu_admission_time = self.env.now 
-            print(f"Patient {patient.id} admitted to AMU at {patient.amu_admission_time}")
-
-            # Record time from referral to AMU admission
-            if hasattr(patient, "consultant_assessment_time"):
-                decision_point = "admitted_after_consultant"
-            elif hasattr(patient, "medical_assessment_time"):
-                decision_point = "admitted_before_consultant"
-            else:
-                decision_point = "admitted_before_medical"
-
-            self.record_result(patient.id, "Discharge Decision Point", decision_point)
-            patient.arrival_to_amu_admission = patient.amu_admission_time - patient.arrival_time
-            patient.referral_to_amu_admission = patient.amu_admission_time - patient.referral_to_medicine_time
-            self.record_result(patient.id, "Arrival to AMU Admission", patient.arrival_to_amu_admission)
-            self.record_result(patient.id, "Referral to AMU Admission", patient.referral_to_amu_admission)
-            self.record_result(patient.id, "Time in System", patient.arrival_to_amu_admission)
-            self.record_event(patient, "amu_admission")
-
-
-            # Mark the patient as transferred to AMU
-            patient.transferred_to_amu = True
+            print(f"Patient {patient.id} discharged while waiting — leaving AMU queue at {self.env.now}.")
             return
+
+        # B) Race: bed + discharge same instant → return the bed immediately
+        if patient.discharge_event in result and bed_get in result:
+            bed = result[bed_get]
+            yield self.amu_beds.put(bed)
+            self.amu_waiting_counter -= 1
+            print(f"Patient {patient.id} discharged as bed arrived — bed returned at {self.env.now}.")
+            return
+
+        # C) Normal admission
+        bed = result[bed_get]
+        self.amu_waiting_counter -= 1
+        patient.amu_admission_time = self.env.now
+        print(f"Patient {patient.id} admitted to AMU at {patient.amu_admission_time}")
+
+        # Decision point
+        if hasattr(patient, "consultant_assessment_time"):
+            decision_point = "admitted_after_consultant"
+        elif hasattr(patient, "initial_medical_assessment_time"):
+            decision_point = "admitted_before_consultant"
+        else:
+            decision_point = "admitted_before_medical"
+
+        self.record_result(patient.id, "Discharge Decision Point", decision_point)
+        patient.arrival_to_amu_admission = patient.amu_admission_time - patient.arrival_time
+        patient.referral_to_amu_admission = patient.amu_admission_time - patient.referral_to_medicine_time
+        self.record_result(patient.id, "Arrival to AMU Admission", patient.arrival_to_amu_admission)
+        self.record_result(patient.id, "Referral to AMU Admission", patient.referral_to_amu_admission)
+        self.record_result(patient.id, "Time in System", patient.arrival_to_amu_admission)
+        self.record_event(patient, "amu_admission")
+        patient.transferred_to_amu = True
+        return
+
 
     # Simulate initial medical assessment process
 
@@ -1070,10 +1115,10 @@ class Model:
                 self.record_result(patient.id, "Discharge Decision Point", "after_initial_medical_assessment")
                 self.record_result(patient.id, "Time in System", time_in_system)
                 self.record_event(patient, "discharge")
-                
-                print(f"Patient {patient.id} Discharged at {patient.discharge_time} after initial medical assessment")
-                return  # Exit process here if discharged
-            
+                if getattr(patient, "discharge_event", None) and not patient.discharge_event.triggered:
+                    patient.discharge_event.succeed()
+                return
+                        
             # If already admitted, skip consultant assessment
             if patient.amu_admission_time is not None and patient.amu_admission_time <= self.env.now:
                 print(f"Patient {patient.id} already admitted to AMU, skipping consultant assessment.")
@@ -1120,12 +1165,13 @@ class Model:
             if random.random() < self.global_params.consultant_discharge_prob:
                 patient.discharged = True
                 patient.discharge_time = self.env.now
-                print(f"Patient {patient.id} discharged at {patient.discharge_time} discharged after consultant assessment")
-                self.record_result(patient.id, "Discharge Decision Point", "discharged_after_consultant_assessment")
                 time_in_system = self.env.now - patient.arrival_time
+                self.record_result(patient.id, "Discharge Decision Point", "discharged_after_consultant_assessment")
                 self.record_result(patient.id, "Time in System", time_in_system)
                 self.record_event(patient, "discharge")
-                return  # Exit process here if discharged
+                if getattr(patient, "discharge_event", None) and not patient.discharge_event.triggered:
+                    patient.discharge_event.succeed()
+                return
       
     # --- Run Method ---
 
@@ -1149,6 +1195,9 @@ class Model:
         self.env.process(self.monitor_amu_queue())
 
         # Start monitoring the consultant queue
+        self.env.process(self.monitor_ed_assessment_queue_length())
+
+        # Start monitoring the consultant queue
         self.env.process(self.monitor_consultant_queue_length())
 
         # Start the triage nurse obstruction process for shifts
@@ -1170,12 +1219,10 @@ class Model:
         self.env.run(until=self.global_params.simulation_time)
 
         # Add 4-hour breach column to individual results
-        self.run_results_df['>4hr breach'] = self.run_results_df['Time in System'] > 240
+        self.run_results_df['Breach 4hr'] = self.run_results_df['Time in System'].gt(240)
 
-        # Add 4-hour breach column to individual results
-        self.run_results_df['>12hr breach'] = self.run_results_df['Time in System'] > 720
- 
-    # --- Summarise Outcomes ---
+        # Add 12-hour breach column to individual results
+        self.run_results_df['Breach 12hr'] = self.run_results_df['Time in System'].gt(720)
 
     def outcome_measures(self):
 
@@ -1195,8 +1242,8 @@ class Model:
             'SDEC Appropriate': ['mean'],
             'SDEC Accepted': ['mean'], 
             'Time in System': ['mean'], 
-            '>4hr breach': ['mean'],
-            '>12hr breach': ['mean'],
+            'Breach 4hr': ['mean'],
+            'Breach 12hr': ['mean'],
             # Add additional measures as necessary
         }).reset_index()
 
@@ -1215,8 +1262,8 @@ class Model:
             'SDEC Appropriate': ['mean'],
             'SDEC Accepted': ['mean'],  
             'Time in System': ['mean'],  
-            '>4hr breach': ['mean'],
-            '>12hr breach': ['mean'],
+            'Breach 4hr': ['mean'],
+            'Breach 12hr': ['mean'],
         }).reset_index()
 
         # Rename columns for clarity
@@ -1234,8 +1281,8 @@ class Model:
             'SDEC Appropriate': ['mean'],
             'SDEC Accepted': ['mean'],
             'Time in System': ['mean'],  
-            '>4hr breach': ['mean'],
-            '>12hr breach': ['mean'],
+            'Breach 4hr': ['mean'],
+            'Breach 12hr': ['mean'],
         }).T.reset_index()
 
         complete_data.columns = ['measure', 'mean_value']

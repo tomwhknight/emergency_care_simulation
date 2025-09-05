@@ -26,7 +26,7 @@ import streamlit as st
 # --- DES Models ---
 st.markdown("### Discrete Event Simulation (DES) Models")
 st.markdown(""" Emergency care is a complex system, with unpredictable demand, variation in clinical needs, and limited resources.  
-Understanding how this system behaves — and how it might respond to changes — requires tools that can capture both complexity and uncertainty.
+Understanding how this system behaves and how it might respond to changes requires tools that can capture both complexity and uncertainty.
 This model uses a method called **Discrete Event Simulation (DES)** to replicate patient journeys through the front-door of the hospital.  
 DES models are built from a small number of key components:
 

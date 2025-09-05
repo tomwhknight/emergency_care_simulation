@@ -6,6 +6,10 @@ class Trial:
     def __init__(self, global_params):
         """Initialize the trial with global parameters."""
         self.global_params = global_params
+
+        # Set output directory
+        self.output_dir = "/Users/thomasknight/Local files/DES/output/des_output/baseline"
+        os.makedirs(self.output_dir, exist_ok=True)
         
         # Initalise empty DataFrame for aggregated patient level results
         self.agg_results_df = pd.DataFrame() 
@@ -19,6 +23,7 @@ class Trial:
         self.agg_results_complete = pd.DataFrame() 
 
         # Initalise empty DataFrame for aggegated queue results
+        self.agg_ed_assessment_queue_monitoring_df = pd.DataFrame(columns=["Simulation Time", "Hour of Day", "Queue Length"])
         self.agg_consultant_queue_monitoring_df = pd.DataFrame(columns=["Simulation Time", "Hour of Day", "Queue Length"])
         self.agg_amu_queue_df = pd.DataFrame()  # Initialize an empty DataFrame for AMU queue monitoring results
 
@@ -81,8 +86,14 @@ class Trial:
             # Add the 'Run Number' column to the consultant monitoring DataFrame
             model.consultant_queue_monitoring_df["Run Number"] = i + 1
 
+            # Add the 'Run Number' column to the consultant monitoring DataFrame
+            model.ed_assessment_queue_monitoring_df["Run Number"] = i + 1
+
             # Concatenate queue monitoring data for this run to the aggregated DataFrame
             self.agg_consultant_queue_monitoring_df = pd.concat([self.agg_consultant_queue_monitoring_df, model.consultant_queue_monitoring_df], ignore_index=True)
+
+            # Concatenate queue monitoring data for this run to the aggregated DataFrame
+            self.agg_ed_assessment_queue_monitoring_df = pd.concat([self.agg_ed_assessment_queue_monitoring_df, model.ed_assessment_queue_monitoring_df], ignore_index=True)
 
             # Concatenate the AMU queue results of each run to the global results DataFrame for AMU queue data
             self.agg_amu_queue_df = pd.concat([self.agg_amu_queue_df, model.amu_queue_df], ignore_index=True)
@@ -106,38 +117,43 @@ class Trial:
             os.makedirs('results')
 
         # Save patient-level results
-        patient_result_path = os.path.join('data', 'results', 'results.csv')
+        patient_result_path = os.path.join(self.output_dir, "baseline_results.csv")
         self.agg_results_df.to_csv(patient_result_path, index=False)
         print(f"Patient results saved to {patient_result_path}")
 
         # Save event log
-        event_log_path = os.path.join('data', 'results', 'event_log.csv')
+        event_log_path = os.path.join(self.output_dir, "baseline_event_log.csv")
         self.agg_event_log.to_csv(event_log_path, index=False)
         print(f"Event log saved to {event_log_path}")
 
         # Save hourly results
-        hourly_result_path = os.path.join('data', 'results', 'summary_results_hour.csv')
+        hourly_result_path = os.path.join(self.output_dir, "baseline_summary_results_hour.csv")
         self.agg_results_hourly.to_csv(hourly_result_path, index=False)
         print(f"Hourly results saved to {hourly_result_path}")
 
         # Save daily results
-        daily_result_path = os.path.join('data', 'results', 'summary_results_day.csv')
+        daily_result_path = os.path.join(self.output_dir, "baseline_summary_results_day.csv")
         self.agg_results_daily.to_csv(daily_result_path, index=False)
         print(f"Daily results saved to {daily_result_path}")
 
-        # Save aggegarted complete results
-        overall_summary_path = os.path.join('data', 'results', 'overall_summary.csv')
-        self.overall_summary.to_csv(overall_summary_path , index=False)
-        print(f"Aggregated summary results saved to {overall_summary_path }")
+        # Save aggregated complete results
+        overall_summary_path = os.path.join(self.output_dir, "baseline_overall_summary.csv")
+        self.overall_summary.to_csv(overall_summary_path, index=False)
+        print(f"Aggregated summary results saved to {overall_summary_path}")
 
         # Save queue monitoring results
-        consultant_queue_result_path = os.path.join('data', 'results', 'consultant_queue_monitoring_results.csv')
+        consultant_queue_result_path = os.path.join(self.output_dir, "baseline_consultant_queue_monitoring_results.csv")
         self.agg_consultant_queue_monitoring_df.to_csv(consultant_queue_result_path, index=False)
         print(f"Queue monitoring results saved to {consultant_queue_result_path}")
 
-        # Save queue monitoring results (AMU queue data)
-        amu_queue_result_path = os.path.join('data', 'results', 'amu_queue_monitoring.csv')
+        # Save queue monitoring results
+        ed_assessment_queue_result_path = os.path.join(self.output_dir, "baseline_ed_assessment_queue_monitoring_results.csv")
+        self.agg_ed_assessment_queue_monitoring_df.to_csv(ed_assessment_queue_result_path , index=False)
+        print(f"Queue monitoring results saved to {ed_assessment_queue_result_path}")
+
+        # Save AMU queue monitoring results
+        amu_queue_result_path = os.path.join(self.output_dir, "baseline_amu_queue_monitoring.csv")
         self.agg_amu_queue_df.to_csv(amu_queue_result_path, index=False)
         print(f"Queue monitoring results saved to {amu_queue_result_path}")
-    
+
         return self.agg_results_df, self.agg_amu_queue_df

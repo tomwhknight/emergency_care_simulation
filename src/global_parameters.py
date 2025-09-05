@@ -1,6 +1,7 @@
 # global_parameters.py
 
 import os
+from src.helper import rota_peak
 class GlobalParameters:
     """Contains constants and parameters used across the simulation (e.g., arrival rates, service times)."""
     def __init__(self, 
@@ -11,19 +12,18 @@ class GlobalParameters:
                 walk_in_acuity_probabilities,
                 medical_referral_rate,
                 paediatric_referral_rate,
-                sdec_appropriate_rate,
                 bloods_request_probability,
                 ambulance_triage_nurse_capacity,
                 walk_in_triage_nurse_capacity,
-                ed_doctor_capacity,
+                shift_patterns,
                 medical_doctor_capacity,
                 consultant_capacity,
                 hca_capacity,
                 sdec_open_hour,
                 sdec_close_hour,
+                max_sdec_capacity, 
                 weekday_sdec_base_capacity,
                 weekend_sdec_base_capacity,
-                max_sdec_capacity,
                 max_amu_available_beds,
                 mean_triage_assessment_time,
                 stdev_triage_assessment_time,
@@ -41,8 +41,8 @@ class GlobalParameters:
                 stdev_consultant_assessment_time,
                 mean_blood_draw_time,
                 stdev_blood_draw_time,
-                mean_blood_lab_time,
-                stdev_blood_lab_time,
+                mu_blood_lab_time,
+                sigma_blood_lab_time,
                 burn_in_time,
                 simulation_time):
 
@@ -77,7 +77,6 @@ class GlobalParameters:
 
             # Outcome thresholds
 
-            self.sdec_appropriate_rate = sdec_appropriate_rate
             self.medical_referral_rate = medical_referral_rate
             self.paediatric_referral_rate = paediatric_referral_rate
         
@@ -86,13 +85,18 @@ class GlobalParameters:
             self.initial_medicine_discharge_prob = initial_medicine_discharge_prob
             self.consultant_discharge_prob = consultant_discharge_prob
             self.bloods_request_probability = bloods_request_probability
+
         
             # Define the resources
 
             self.ambulance_triage_nurse_capacity = ambulance_triage_nurse_capacity
             self.walk_in_triage_nurse_capacity = walk_in_triage_nurse_capacity
             self.hca_capacity = hca_capacity 
-            self.ed_doctor_capacity = ed_doctor_capacity
+            
+            
+            self.shift_patterns = shift_patterns 
+
+            # Calculate the maximum ED doctor capacity from shift patterns
             self.medical_doctor_capacity = medical_doctor_capacity
             self.consultant_capacity = consultant_capacity
 
@@ -105,7 +109,6 @@ class GlobalParameters:
 
             self.weekday_sdec_base_capacity = weekday_sdec_base_capacity
             self.weekend_sdec_base_capacity = weekend_sdec_base_capacity
-
         
             # Assessment times   
             self.mean_triage_assessment_time = mean_triage_assessment_time 
@@ -114,8 +117,8 @@ class GlobalParameters:
             self.mean_blood_draw_time = mean_blood_draw_time
             self.stdev_blood_draw_time = stdev_blood_draw_time
 
-            self.mean_blood_lab_time = mean_blood_lab_time
-            self.stdev_blood_lab_time = stdev_blood_lab_time
+            self.mu_blood_lab_time = mu_blood_lab_time
+            self.sigma_blood_lab_time = sigma_blood_lab_time
 
             self.mu_ed_service_time = mu_ed_service_time
             self.sigma_ed_service_time = sigma_ed_service_time

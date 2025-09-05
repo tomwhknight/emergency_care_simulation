@@ -1,5 +1,6 @@
 # run.py
 
+
 USE_ALT_MODEL = False  # Set to False to use the original model
 
 if USE_ALT_MODEL:
@@ -11,15 +12,56 @@ else:
 
 from src.global_parameters import GlobalParameters
 from src.model import Model
+from src.helper import rota_peak, save_rota_check
 
 if __name__ == "__main__":
+
+    # --- Calculate peak capacity first ---
+
+    shift_patterns = [
+                # Tier 1 Resident
+                {"role": "tier_1", "shift_name": "Early",    "start": "08:00", "end": "15:45", "count": 7},
+                {"role": "tier_1", "shift_name": "Early 2",  "start": "08:00", "end": "17:00", "count": 2},
+                {"role": "tier_1", "shift_name": "Middle_1",   "start": "10:00", "end": "18:30", "count": 3},
+                {"role": "tier_1", "shift_name": "Middle_2",   "start": "13:00", "end": "21:30", "count": 2},
+                {"role": "tier_1", "shift_name": "Twilight",     "start": "16:00", "end": "23:30", "count": 5},
+                {"role": "tier_1", "shift_name": "Night",   "start": "22:00", "end": "07:30", "count": 3},
+            
+                # Tier 2 Resident
+                {"role": "tier_2", "shift_name": "Early",  "start": "08:00", "end": "15:45", "count": 3},
+                {"role": "tier_2", "shift_name": "Middle", "start": "11:00", "end": "18:30", "count": 2},
+                {"role": "tier_2", "shift_name": "Twilight","start": "16:00", "end": "23:30", "count": 5},
+                {"role": "tier_2", "shift_name": "Night",    "start": "22:00", "end": "07:30", "count": 3},
+                
+                # GP
+                {"role": "GP", "shift_name": "GP", "start": "09:00", "end": "22:30", "count": 1},
+
+                # PA
+                {"role": "PA", "shift_name": "Early", "start": "08:00", "end": "15:30", "count": 1},
+                {"role": "PA", "shift_name": "Late", "start": "12:00", "end": "21:30", "count": 1},
+            
+                # ACP
+                {"role": "ACP", "shift_name": "Early",       "start": "07:30", "end": "15:30", "count": 1},
+                {"role": "ACP", "shift_name": "Late",        "start": "15:30", "end": "23:30", "count": 1},
+
+                # ENP
+                {"role": "ENP", "shift_name": "Early",     "start": "08:00", "end": "20:30", "count": 1},
+                {"role": "ENP", "shift_name": "Late",        "start": "11:00", "end": "23:30", "count": 1},
+            ]
+    
+    # Path to your baseline output dir
+    output_dir = "/Users/thomasknight/Local files/DES/output/des_output/baseline"
+
+    rota_path = save_rota_check(shift_patterns, output_dir)
+    print(f"Rota check saved to {rota_path}")
+
     global_params = GlobalParameters(
 
         ambulance_proportion = 20,
         walk_in_proportion = 80,
 
         # Source of referral
-        proportion_direct_primary_care = 0.03,  
+        proportion_direct_primary_care = 0.01,  
         
         # Patient characterstics 
         
@@ -39,21 +81,18 @@ if __name__ == "__main__":
         5: 0.20,
         },  
 
-        # Patient characteristic variables
-
-        sdec_appropriate_rate = 0.10,
 
         # Staffing resource
         ambulance_triage_nurse_capacity = 1,
-        walk_in_triage_nurse_capacity = 2,
-        hca_capacity = 2, 
+        walk_in_triage_nurse_capacity = 3,
+        hca_capacity = 3, 
 
-        ed_doctor_capacity = 26,
         medical_doctor_capacity = 5,
         consultant_capacity = 1, 
+        shift_patterns = shift_patterns,
 
-        # SDEC capacity
-        bloods_request_probability = 0.3,
+        # Bloods
+        bloods_request_probability = 0.5,
 
         # SDEC capacity
         sdec_open_hour = 7, 
@@ -64,23 +103,23 @@ if __name__ == "__main__":
 
         # AMU capacity
         max_amu_available_beds = 10,
-        max_sdec_capacity = 10,
+        max_sdec_capacity = 5,
 
         # Service times
-        mean_triage_assessment_time = 5,
-        stdev_triage_assessment_time = 2,
+        mean_triage_assessment_time = 6,
+        stdev_triage_assessment_time = 1,
 
-        mean_blood_draw_time = 5, 
-        stdev_blood_draw_time = 2,
+        mean_blood_draw_time = 6, 
+        stdev_blood_draw_time = 1,
 
-        mean_blood_lab_time = 90,
-        stdev_blood_lab_time = 15,
+        mu_blood_lab_time = 4.0,
+        sigma_blood_lab_time = 0.5,
     
-        mu_ed_service_time = 4.37, 
-        sigma_ed_service_time = 0.83, 
+        mu_ed_service_time = 3.9, 
+        sigma_ed_service_time = 0.5, 
 
         max_ed_service_time = 240,
-        min_ed_service_time = 20,  
+        min_ed_service_time = 0,  
 
         mu_medical_service_time = 4.3,
         sigma_medical_service_time = 0.5,
@@ -93,19 +132,20 @@ if __name__ == "__main__":
 
         # Routing logic
 
-        medical_referral_rate = 0.4,
+        medical_referral_rate = 0.40,
         paediatric_referral_rate = 0.1,
 
         initial_medicine_discharge_prob = 0.10,
         consultant_discharge_prob = 0.4,
 
+        simulation_time = 11520,
+        burn_in_time = 1440)  # burn in to prevent initiation bias 
     
+    global_params.max_ed_capacity = rota_peak(global_params.shift_patterns)
+
         
-        simulation_time = 2880,
-        burn_in_time = 1440)  # burn in to prevent initiation bias    
-    
     trial = Trial(global_params)
-    total_runs = 10
+    total_runs = 50
     trial.run(total_runs)
 
  
