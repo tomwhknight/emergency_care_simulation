@@ -238,9 +238,9 @@ class Model:
             )[0]
 
             # Admission probability 
-            admission_probs = self.admission_probability_distribution_data["admission_probability"].values
-            weights = self.admission_probability_distribution_data["weight"].values
-            admission_probability = np.random.choice(admission_probs, p=weights)
+            admission_probability = np.random.choice(
+            self.admission_probability_distribution_data["p_cal"].values
+            )
 
            # SDEC appropriate
             if adult:
@@ -1000,42 +1000,47 @@ class Model:
         yield self.env.process(self.initial_medical_assessment(patient))  # Wait for this to finish
 
     # Simulate request for AMU bed
-
     def refer_to_amu_bed(self, patient):
-        """Request a bed for the patient if available, or exit early if discharged."""
+        """Request a bed for the patient if available, or exit early if discharged.
+        cancel the pending Store.get() when discharge wins.
+        """
         # Ensure the discharge event exists (consistent name!)
         if getattr(patient, "discharge_event", None) is None:
             patient.discharge_event = self.env.event()
 
-        # Always increment the waiting counter
+        # Count this patient as waiting for an AMU bed
         self.amu_waiting_counter += 1
         print(f"Patient {patient.id} requesting AMU bed at {self.env.now}, queue size: {self.amu_waiting_counter}")
 
-        # Wait for either a bed OR a discharge
+        # Create the bed request and wait for either: a bed OR a discharge
         bed_get = self.amu_beds.get()
         result = yield bed_get | patient.discharge_event
 
-        # A) Discharged first → never touch a bed
-        if patient.discharge_event in result and bed_get not in result:
+        # --- A) Discharged first -> cancel the pending get() to avoid a zombie consumer ---
+        if (patient.discharge_event in result) and (bed_get not in result):
+            try:
+                bed_get.cancel()  # critical: remove orphaned get() from the Store's queue
+            except Exception:
+                pass
             self.amu_waiting_counter -= 1
             print(f"Patient {patient.id} discharged while waiting — leaving AMU queue at {self.env.now}.")
             return
 
-        # B) Race: bed + discharge same instant → return the bed immediately
-        if patient.discharge_event in result and bed_get in result:
+        # --- B) Race: bed + discharge same instant -> return the bed immediately ---
+        if (patient.discharge_event in result) and (bed_get in result):
             bed = result[bed_get]
             yield self.amu_beds.put(bed)
             self.amu_waiting_counter -= 1
             print(f"Patient {patient.id} discharged as bed arrived — bed returned at {self.env.now}.")
             return
 
-        # C) Normal admission
+        # --- C) Normal admission: bed arrived first ---
         bed = result[bed_get]
         self.amu_waiting_counter -= 1
         patient.amu_admission_time = self.env.now
         print(f"Patient {patient.id} admitted to AMU at {patient.amu_admission_time}")
 
-        # Decision point
+        # Decision point labelling for your results
         if hasattr(patient, "consultant_assessment_time"):
             decision_point = "admitted_after_consultant"
         elif hasattr(patient, "initial_medical_assessment_time"):
@@ -1052,7 +1057,6 @@ class Model:
         self.record_event(patient, "amu_admission")
         patient.transferred_to_amu = True
         return
-
 
     # Simulate initial medical assessment process
 

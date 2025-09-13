@@ -61,7 +61,7 @@ class GlobalParameters:
             
             # Define the file path for patient attributes
             self.news2_file = os.path.join(self.project_dir, "data/patient_attributes/news2_distribution.csv")
-            self.admission_probability_file = os.path.join(self.project_dir, "data/patient_attributes/admission_prob_distribution.csv")
+            self.admission_probability_file = os.path.join(self.project_dir, "data/patient_attributes/calibrated_predicted_probabilities.csv")
             self.ed_service_time_scaling_factor_file = os.path.join(self.project_dir, "data/patient_attributes/ed_assessment_scaling.csv")
 
             # Mode of arrival
