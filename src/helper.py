@@ -67,97 +67,191 @@ class Lognormal:
         Sample from the normal distribution
         """
         return self.rand.lognormal(self.mu, self.sigma)
-    
+
+
+def exp_rv(rate: float, rng) -> float:
+    """
+    Exponential(rate) using a specific RNG stream.
+    Returns np.inf if rate <= 0 so callers can yield timeout(np.inf) safely.
+    """
+    if rate <= 0:
+        return float('inf')
+    return -np.log1p(-rng.random()) / rate
+
+def wchoice(items, weights, rng):
+    """
+    Weighted categorical choice using a specific RNG stream.
+    items: sequence of labels
+    weights: non-negative weights (need not be normalized)
+    """
+    items = np.asarray(list(items))
+    p = np.asarray(list(weights), dtype=float)
+    s = p.sum()
+    if len(items) == 0:
+        raise ValueError("wchoice called with empty items.")
+    if s <= 0:
+        # fallback: uniform over items
+        idx = rng.integers(0, len(items))
+        return items[idx]
+    p = p / s
+    idx = rng.choice(len(items), p=p)
+    return items[idx]
+
+def bern(p: float, rng) -> bool:
+    """
+    Bernoulli(p) using a specific RNG stream. Clamps p to [0,1].
+    """
+    if p <= 0:
+        return False
+    if p >= 1:
+        return True
+    return rng.random() < p
+
+
+
+
 
     # function to track resouce utilisation
 
     def audit_utilisation(self, activity_attribute, resource_attribute):
         activity_durations = [getattr(i, activity_attribute) for i in self.patient_objects]
         return sum(activity_durations) / (g.getattr(resource_attribute) * g.sim_duration)
-    
+
 
     # Rota math
 
     # --- Rota capacity helpers ---
-
-def _hhmm_to_min(s: str) -> int:
-    hh, mm = map(int, s.split(":"))
-    return hh * 60 + mm
-
-def _is_active(start_min: int, end_min: int, m: int) -> bool:
-    """Supports overnight shifts (e.g., 22:00 → 08:00)."""
-    if start_min < end_min:
-        return start_min <= m < end_min
-    else:
-        return m >= start_min or m < end_min
-
-def rota_peak(shift_patterns, roles=None) -> int:
-    """
-    Return peak simultaneous headcount across the day.
-    - shift_patterns: list of dicts with keys: start, end, count, role
-    - roles: optional set of roles to include (e.g., {"tier_1","tier_2"})
-    """
-    # optionally filter roles
-    if roles is not None:
-        shift_patterns = [s for s in shift_patterns if s.get("role") in roles]
-
-    peak = 0
-    for m in range(1440):  # every minute of the day
-        total = 0
-        for sh in shift_patterns:
-            start = _hhmm_to_min(sh["start"])
-            end   = _hhmm_to_min(sh["end"])
-            cnt   = int(sh.get("count", 0))
-            if _is_active(start, end, m):
-                total += cnt
-        peak = max(peak, total)
-    return peak
-
+    # --- Rota capacity helpers (copy/paste this whole block) ---
 
 def time_to_minutes(hhmm: str) -> int:
     h, m = map(int, hhmm.split(":"))
     return h * 60 + m
 
-def on_shift_at(mins_in_day: int, start_str: str, end_str: str) -> bool:
+def _mins_to_end_at(mins_in_day: int, start_str: str, end_str: str):
+    """
+    Minutes-to-end for a shift at time mins_in_day.
+    Returns None if shift is not active at that minute. Handles overnight.
+    """
+    day = 1440
     start = time_to_minutes(start_str)
-    end = time_to_minutes(end_str)
+    end   = time_to_minutes(end_str)
+    # active?
     if start < end:
-        return start <= mins_in_day < end
+        if not (start <= mins_in_day < end):
+            return None
+        return end - mins_in_day
     else:
-        # Overnight shift (e.g. 22:00 → 07:30)
-        return mins_in_day >= start or mins_in_day < end
+        # overnight (e.g., 22:00 -> 08:00)
+        if not (mins_in_day >= start or mins_in_day < end):
+            return None
+        if mins_in_day < end:        # after midnight before end
+            return end - mins_in_day
+        else:                        # before midnight after start
+            return day - mins_in_day + end
 
-def staff_by_hour(shift_patterns):
+def rota_peak(shift_patterns, roles=None, end_cutoff=30) -> int:
+    """
+    Peak simultaneous headcount across the day **excluding shifts that are within
+    the last `end_cutoff` minutes of finishing** at a given minute.
+    Starters ARE included (no start-block here).
+    - roles: optional set of roles to include (e.g., {"tier_1","tier_2"}).
+    """
+    if roles is not None:
+        shift_patterns = [s for s in shift_patterns if s.get("role") in roles]
+
+    peak = 0
+    for m in range(1440):  # each minute of the day
+        total = 0
+        for sh in shift_patterns:
+            mte = _mins_to_end_at(m, sh["start"], sh["end"])
+            if mte is None:
+                continue        # not active at this minute
+            if mte <= end_cutoff:
+                continue        # finishing soon → exclude from peak
+            total += int(sh.get("count", 0))
+        if total > peak:
+            peak = total
+    return peak
+
+def staff_by_hour(shift_patterns, end_cutoff=30):
+    """
+    Counts staff at the **start of each hour** (H:00), excluding shifts that are
+    within the last `end_cutoff` minutes of finishing at that minute.
+    Returns (hours, totals, by_role) as before.
+    """
     hours = list(range(24))
     totals = []
     by_role = defaultdict(list)
     roles = sorted(set(s["role"] for s in shift_patterns))
 
     for H in hours:
-        t = H * 60
+        t = H * 60  # start of the hour
         total_here = 0
         counts_here = {role: 0 for role in roles}
         for s in shift_patterns:
-            if on_shift_at(t, s["start"], s["end"]):
-                total_here += s["count"]
-                counts_here[s["role"]] += s["count"]
+            mte = _mins_to_end_at(t, s["start"], s["end"])
+            if mte is None:
+                continue
+            if mte <= end_cutoff:
+                continue
+            cnt = int(s.get("count", 0))
+            total_here += cnt
+            counts_here[s["role"]] += cnt
         totals.append(total_here)
         for role in roles:
             by_role[role].append(counts_here[role])
 
     return hours, totals, by_role
 
-def rota_to_dataframe(shift_patterns):
-    hours, totals, by_role = staff_by_hour(shift_patterns)
+def rota_to_dataframe(shift_patterns, end_cutoff=30):
+    hours, totals, by_role = staff_by_hour(shift_patterns, end_cutoff=end_cutoff)
     df = pd.DataFrame({"Hour": hours, "Total": totals})
     for role, counts in by_role.items():
         df[role] = counts
     return df
 
-def save_rota_check(shift_patterns, output_dir, filename="rota_check.csv"):
-    """Save rota sanity check table to a CSV in the given output directory."""
-    df = rota_to_dataframe(shift_patterns)
-    os.makedirs(output_dir, exist_ok=True)  # make sure dir exists
-    filepath = os.path.join(output_dir, filename)
-    df.to_csv(filepath, index=False)
-    return filepath
+def save_rota_check(patterns, out_dir, filename="rota_check.csv",
+                    start_block=15, end_cutoff=45, resolution_minutes=1):
+    """
+    Build and save a simple 24h availability table from `patterns` applying the same
+    handover rules your sim uses. Does NOT rely on rota_peak(return_df=...).
+    """
+    os.makedirs(out_dir, exist_ok=True)
+
+    def to_min(t):
+        h, m = map(int, t.split(":"))
+        return 60*h + m
+
+    day = 24 * 60
+    minutes = list(range(0, day, resolution_minutes))
+    rows = []
+
+    for now in minutes:
+        available = 0
+        for s in patterns:
+            start = to_min(s["start"])
+            end   = to_min(s["end"])
+            count = int(s.get("count", 0))
+
+            if start < end:
+                active = (start <= now < end)
+                if not active:
+                    continue
+                mins_since = now - start
+                mins_to_end = end - now
+            else:
+                active = (now >= start) or (now < end)
+                if not active:
+                    continue
+                mins_since = (now - start) if now >= start else (day - start + now)
+                mins_to_end = (end - now) if now < end else (day - now + end)
+
+            if mins_since >= start_block and mins_to_end > end_cutoff:
+                available += count
+
+        rows.append({"minute_of_day": now, "hour": now // 60, "effective_capacity": available})
+
+    df = pd.DataFrame(rows)
+    path = os.path.join(out_dir, filename)
+    df.to_csv(path, index=False)
+    return path

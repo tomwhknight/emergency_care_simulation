@@ -1,0 +1,16 @@
+measure,mean_value,run_number,Scenario,DT Threshold
+Arrival to Triage Nurse Assessment,0.0,10,alt_dt_0.70,0.7
+Arrival to ED Assessment,5.075900065462486,10,alt_dt_0.70,0.7
+Arrival to Referral,36.721595920160375,10,alt_dt_0.70,0.7
+Arrival to Medical Assessment,1787.221409339491,10,alt_dt_0.70,0.7
+Arrival to Consultant Assessment,3146.1663466324553,10,alt_dt_0.70,0.7
+SDEC Appropriate,0.00037257824143070045,10,alt_dt_0.70,0.7
+SDEC Accepted,0.04281345565749235,10,alt_dt_0.70,0.7
+Time in System,626.9291392847014,10,alt_dt_0.70,0.7
+Breach 4hr,0.1453055141579732,10,alt_dt_0.70,0.7
+Breach 12hr,0.12853949329359166,10,alt_dt_0.70,0.7
+Mean ED Attendances per Day,335.5,10,alt_dt_0.70,0.7
+Proportion Referred - Medicine,0.19746646795827125,10,alt_dt_0.70,0.7
+SDEC Accepted (of Appropriate),0.10606060606060606,10,alt_dt_0.70,0.7
+Direct Triage Eligible (share),0.12667660208643816,10,alt_dt_0.70,0.7
+Direct Triage Used (share),0.12667660208643816,10,alt_dt_0.70,0.7

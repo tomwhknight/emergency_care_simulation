@@ -1,6 +1,5 @@
 # run.py
 
-
 USE_ALT_MODEL = False  # Set to False to use the original model
 
 if USE_ALT_MODEL:
@@ -116,8 +115,11 @@ global_params = GlobalParameters(
     mu_blood_lab_time = 4.0,
     sigma_blood_lab_time = 0.5,
 
-    mu_ed_service_time = 3.89, 
-    sigma_ed_service_time = 0.47, 
+    mu_ed_service_time = 3.98, 
+    sigma_ed_service_time = 0.40, 
+
+    mu_ed_decision_time = 4.11,
+    sigma_ed_decision_time = 0.75,
 
     max_ed_service_time = 240,
     min_ed_service_time = 0,  
@@ -139,14 +141,11 @@ global_params = GlobalParameters(
     initial_medicine_discharge_prob = 0.10,
     consultant_discharge_prob = 0.4,
 
-    simulation_time = 11520,
-    burn_in_time = 1440)  # burn in to prevent initiation bias 
-
-
+    simulation_time = 8640,
+    burn_in_time = 2880)  # burn in to prevent initiation bias 
 
 global_params.max_ed_capacity = rota_peak(global_params.shift_patterns)
 
-        
 def run_model(global_params, mu, sigma, total_runs=50):
     global_params.mu_ed_service_time = mu
     global_params.sigma_ed_service_time = sigma
@@ -154,11 +153,25 @@ def run_model(global_params, mu, sigma, total_runs=50):
     trial = Trial(global_params)
     trial.run(total_runs)
 
+    df = trial.agg_results_df.copy()
 
-    s = trial.agg_results_df["Time in System"]                 # raw Series (may have strings/NaN)
-    sim = pd.to_numeric(s, errors="coerce").to_numpy()         # coerce to float
-    sim = sim[np.isfinite(sim)]                                # drop NaN/inf
-    return sim 
+    # Map columns to standard names
+    rename_map = {
+        "Time in System": "time_in_system",
+        "Clock Hour of Arrival": "hour_of_day",
+        "Admitted": "admitted"
+    }
+    cols = {k: v for k, v in rename_map.items() if k in df.columns}
+    df = df.rename(columns=cols)
+
+    # Ensure columns exist, fill if not
+    if "hour_of_day" not in df:
+        df["hour_of_day"] = "00:00"    # dummy value if missing
+    if "admitted" not in df:
+        df["admitted"] = 0             # default to non-admitted
+
+    return df[["time_in_system", "hour_of_day", "admitted"]]
+
 
 if __name__ == "__main__":
     # Example: save rota check
