@@ -27,17 +27,28 @@ class AltModel(Model):
         self._scenario_name = f"alt_dt_{th:.2f}" if np.isfinite(th) else "alt_dt_unset"
 
     # ---------- Fallback after SDEC rejects: choose ED vs Direct-to-Medicine ----------
-    def ed_or_direct(self, patient):
-        # Prefer the value on global_params; fall back to the cached _dt_threshold
-        threshold = getattr(self.global_params, "direct_triage_threshold", self._dt_threshold)
-        if not (isinstance(threshold, (int, float)) and 0 <= threshold <= 1):
-            raise ValueError("direct_triage_threshold must be in [0,1].")
 
-        # RULE: NEWS2 ≤ 4, acuity != 1, prob ≥ threshold
+    def ed_or_direct(self, patient):
+        """
+        Fallback after SDEC rejects/closed/no capacity:
+        - Clinical screen: NEWS2 ≤ 4 and acuity != 1
+        - If direct_triage_threshold is None: everyone passing clinical screen goes direct
+        - Else: gate on RAW score (patient.referral_score) >= threshold
+        """
+        th = getattr(self.global_params, "direct_triage_threshold", None)
+        try:
+            th = float(th) if th is not None else None
+        except Exception:
+            th = None
+
         news_ok   = (patient.news2 <= 4)
         acuity_ok = (patient.acuity != 1)
-        prob_ok   = (patient.admission_probability >= threshold)
-        eligible  = news_ok and acuity_ok and prob_ok
+
+        if th is None:
+            eligible = news_ok and acuity_ok
+        else:
+            score = patient.referral_score     
+            eligible = news_ok and acuity_ok and (score >= th)
 
         # Record for analysis
         self.record_result(patient.id, "DT Eligible", bool(eligible))
@@ -47,6 +58,7 @@ class AltModel(Model):
             return self.env.process(self.direct_triage_to_medicine(patient))
         else:
             return self.env.process(self.ed_assessment(patient))
+
 
     # ---------- Perform the direct referral (reuses downstream logic) ----------
     def direct_triage_to_medicine(self, patient):

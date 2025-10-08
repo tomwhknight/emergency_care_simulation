@@ -1,7 +1,7 @@
 # run.py
 
 
-USE_ALT_MODEL = False  # Set to False to use the original model
+USE_ALT_MODEL = True  # Set to False to use the original model
 
 if USE_ALT_MODEL:
     from src.trial_alt import AltTrial as Trial
@@ -23,9 +23,6 @@ import pandas as pd
 from src.global_parameters import GlobalParameters
 from src.model import Model
 from src.helper import rota_peak, save_rota_check
-
-
-
 
 # --- Calculate peak capacity first ---
 
@@ -98,7 +95,6 @@ global_params = GlobalParameters(
     5: 0.20,
     },  
 
-
     # Staffing resource
     ambulance_triage_nurse_capacity = 1,
     walk_in_triage_nurse_capacity = 3,
@@ -153,7 +149,8 @@ global_params = GlobalParameters(
 
     # Routing logic
 
-    medical_referral_rate = 0.5,
+    sdec_prob_threshold = 0.1,
+    other_specialty_referral_rate = 0.15,  # must be in [0,1]
     paediatric_referral_rate = 0.1,
 
     initial_medicine_discharge_prob = 0.05,
@@ -161,14 +158,13 @@ global_params = GlobalParameters(
 
     # Threshold for scerio analysis
 
-    direct_triage_threshold = 0.7,
+    direct_triage_threshold = None,
 
     # Simulation
 
-    simulation_time = 51840,
+    simulation_time = 14400,
     cool_down_time = 1440,
-    burn_in_time = 10080)  # burn in to prevent initiation bias 
-
+    burn_in_time = 2880)  # burn in to prevent initiation bias 
 
 global_params.max_ed_doctor_capacity = max(
     rota_peak(shift_patterns_weekday),
@@ -181,7 +177,7 @@ if __name__ == "__main__":
     trial = Trial(global_params, MASTER_SEED)
     
     t0 = time.perf_counter()
-    info = trial.run(run_number=25)
+    info = trial.run(run_number=5)
     
     # Create folder for each batch           
     # --- Create folder for each batch and include ED service parameters ---
@@ -191,7 +187,6 @@ if __name__ == "__main__":
     batch_label = f"batch_mu{mu:.2f}_sigma{sigma:.2f}"
     batch_dir = os.path.join(info["scenario_dir"], batch_label)
     os.makedirs(batch_dir, exist_ok=True)
-
 
     # --- Print a quick summary to console ---
     total_runs = info.get("total_runs", 5)   # fallback to what you passed in

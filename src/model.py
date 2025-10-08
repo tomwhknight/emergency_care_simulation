@@ -36,10 +36,18 @@ class Model:
         self.sdec_slot_rate_data = pd.read_csv(self.global_params.sdec_slot_rate_file)
         self.arrival_rate_data = pd.read_csv(self.global_params.arrival_rate_file)
         self.booked_rate_data =  pd.read_csv(self.global_params.booked_rate_file)
-
         self.news_distribution_data = pd.read_csv(self.global_params.news2_file)
         self.admission_probability_distribution_data = pd.read_csv(self.global_params.admission_probability_file)
        
+
+        assert {"p_cal", "p_raw"} <= set(self.admission_probability_distribution_data.columns), \
+            "Expected columns p_cal and p_raw in the distribution CSV."
+
+        self._p_cal = self.admission_probability_distribution_data["p_cal"].to_numpy()
+        self._p_raw = self.admission_probability_distribution_data["p_raw"].to_numpy()
+        self._p_n   = len(self._p_cal)
+
+
         # Create results DF
 
         # Define standard columns, structured by category
@@ -56,7 +64,8 @@ class Model:
             "Patient Age",
             "Adult",
             "NEWS2",
-            "Admission Probability",
+            "Referral Probability (Calibrated)",
+            "Referral Score (Raw)",
             "Source of Referral",
             "Booked Appointment",
             "Mode of Arrival",
@@ -264,14 +273,16 @@ class Model:
                 self.rng_probs
             )
 
-            # Admission probability 
-            admission_probability = self.rng_probs.choice(
-                self.admission_probability_distribution_data["p_cal"].values
-            )
+            # Referral and Admission Probabilities
+            
+            # --- Paired draw: pick one row and take both calibrated and raw ---
+            idx = int(self.rng_probs.integers(self._p_n))
+            referral_prob_cal = float(self._p_cal[idx])   # calibrated (prevalence-matched)
+            referral_score_raw = float(self._p_raw[idx])  # raw score for ranking    
 
            # SDEC appropriate
             if adult:
-                if (acuity not in [1, 2]) and (news2 < 4) and (admission_probability < 0.5):
+                if (acuity not in [1, 2]) and (news2 < 4) and (referral_prob_cal < self.global_params.sdec_prob_threshold):
                     sdec_appropriate = True
                 else:
                     sdec_appropriate = False
@@ -300,7 +311,8 @@ class Model:
                 age=age,
                 adult=adult,
                 news2=news2,
-                admission_probability=admission_probability,
+                referral_prob_cal = referral_prob_cal,
+                referral_score_raw  = referral_score_raw,
                 acuity=acuity,
                 sdec_appropriate=sdec_appropriate,
                 ed_disposition=None,
@@ -323,7 +335,9 @@ class Model:
             "Source of Referral": source_of_referral,
             "Booked Appointment": "",
             "Acuity": acuity,
-            "Admission Probability": admission_probability, 
+            "Referral Probability (Calibrated)": referral_prob_cal,              # new
+            "Referral Score (Raw)": referral_score_raw,    
+
 
             # --- Triage-Related Metrics ---
             "Queue Length Walk in Triage Nurse": np.nan,
@@ -834,7 +848,6 @@ class Model:
 
             yield self.env.timeout(tick)
 
-
     def doctor_break_cycle(self, break_dur=30, jitter_max=30):
         """
         Schedule ED-doctor breaks day-by-day so weekend/weekday patterns are respected.
@@ -1251,24 +1264,28 @@ class Model:
                 patient.ed_disposition = "Discharge"
 
         else:
-            admitted = bern(patient.admission_probability, self.rng_probs)
-            if not admitted:
-                # Adult discharge → may need to wait for bloods
-                if patient.bloods_ready_time > self.env.now:
-                    wait_time = patient.bloods_ready_time - self.env.now
-                    yield self.env.timeout(wait_time)
-                    self.record_result(patient.id, "Wait for Bloods After Assessment", wait_time)
-                    log(lambda: f"[{self.env.now:.2f}] Patient {patient.id} blood results available.")
-                else:
-                    self.record_result(patient.id, "Wait for Bloods After Assessment", 0)
-                patient.ed_disposition = "Discharge"
+
+            # --- Medicine-calibrated decision ---
+            referred_medicine = bern(patient.referral_prob_cal, self.rng_probs)
+
+            if referred_medicine:
+                # p_cal targets Medicine specifically → go straight to Medicine
+                patient.ed_disposition = "Refer - Medicine"
+
             else:
-                patient.ed_disposition = wchoice(
-                ["Refer - Medicine", "Refer - Other Speciality"],
-                [self.global_params.medical_referral_rate,
-                1 - self.global_params.medical_referral_rate],
-                self.rng_probs
-            )
+                # Among the non-Medicine remainder, split Other vs Discharge
+                referred_other = bern(self.global_params.other_specialty_referral_rate, self.rng_probs)
+                if referred_other:
+                    patient.ed_disposition = "Refer - Other Speciality"
+                else:
+                    # Discharge → may need to wait for bloods
+                    if patient.bloods_ready_time > self.env.now:
+                        wait_time = patient.bloods_ready_time - self.env.now
+                        yield self.env.timeout(wait_time)
+                        self.record_result(patient.id, "Wait for Bloods After Assessment", wait_time)
+                    else:
+                        self.record_result(patient.id, "Wait for Bloods After Assessment", 0)
+                    patient.ed_disposition = "Discharge"
 
         self.record_result(patient.id, "ED Disposition", patient.ed_disposition)
 
@@ -1653,6 +1670,50 @@ class Model:
         complete_data = pd.concat([complete_data, sdec_row], ignore_index=True)
 
 
+        # p_cal targets adult Medicine referral. Exclude SDEC Accepted so we only look at the ED decision.
+        adults  = copy[copy["Adult"] == True]
+        ed_only = adults[adults["ED Disposition"] != "SDEC Accepted"].copy()
+
+        mean_pcal = ed_only["Referral Probability (Calibrated)"].mean()
+        obs_med   = (ed_only["ED Disposition"] == "Refer - Medicine").mean() if len(ed_only) else np.nan
+        gap       = (obs_med - mean_pcal) if len(ed_only) else np.nan
+
+        not_med = ed_only[ed_only["ED Disposition"] != "Refer - Medicine"]
+        other_given_not_med = (
+            (not_med["ED Disposition"] == "Refer - Other Speciality").mean()
+            if len(not_med) else np.nan
+        )
+
+        # Append summary rows to the existing complete_data (so it lands in baseline_summary_complete.csv)
+        cal_rows = pd.DataFrame([
+            ["Mean p_cal (Adults, ED-only)", mean_pcal],
+            ["Observed P(Medicine) (Adults, ED-only)", obs_med],
+            ["Observed - p_cal (Adults, ED-only)", gap],
+            ["P(Other | not Medicine) (Adults, ED-only)", other_given_not_med],
+        ], columns=["measure", "mean_value"])
+        
+        complete_data = pd.concat([complete_data, cal_rows], ignore_index=True)
+
+        # Build a decile table for monotonicity (Adults, ED-only)
+        if len(ed_only):
+            ed_only = ed_only.copy()
+            ed_only["pcal_decile"] = pd.qcut(
+                ed_only["Referral Probability (Calibrated)"],
+                10, labels=False, duplicates="drop"
+            )
+            calib_deciles = (ed_only
+                .groupby("pcal_decile", observed=True)
+                .agg(
+                    mean_p_cal=("Referral Probability (Calibrated)", "mean"),
+                    obs_prop_medicine=("ED Disposition", lambda s: (s == "Refer - Medicine").mean()),
+                    n=("ED Disposition", "size"),
+                )
+                .reset_index()
+                .sort_values("pcal_decile"))
+        else:
+            calib_deciles = pd.DataFrame(columns=["pcal_decile","mean_p_cal","obs_prop_medicine","n"])
+
+
         # --- Direct-triage summaries ---
 
         dt_eligible_share = copy["DT Eligible"].mean() if len(copy) else np.nan
@@ -1675,6 +1736,22 @@ class Model:
         for df in (hourly_data, daily_data, complete_data):
             df["Scenario"] = scenario
             df["DT Threshold"] = thresh
+
+        # Tag & expose calibration tables for the Trial to aggregate/save
+        calib_deciles["run_number"]  = self.run_number
+        calib_deciles["Scenario"]    = scenario
+        calib_deciles["DT Threshold"] = thresh
+        self.calibration_deciles = calib_deciles
+
+        calib_summary = cal_rows.copy()
+        calib_summary["run_number"]  = self.run_number
+        calib_summary["Scenario"]    = scenario
+        calib_summary["DT Threshold"] = thresh
+        self.calibration_summary = calib_summary
+
+        self.results_hourly   = hourly_data
+        self.results_daily    = daily_data
+        self.results_complete = complete_data
 
         self.results_hourly = hourly_data
         self.results_daily = daily_data

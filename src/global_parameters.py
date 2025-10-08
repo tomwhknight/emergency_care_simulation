@@ -10,7 +10,7 @@ class GlobalParameters:
                 proportion_direct_primary_care,
                 ambulance_acuity_probabilities,
                 walk_in_acuity_probabilities,
-                medical_referral_rate,
+                other_specialty_referral_rate,
                 paediatric_referral_rate,
                 bloods_request_probability,
                 ambulance_triage_nurse_capacity,
@@ -25,6 +25,7 @@ class GlobalParameters:
                 max_sdec_capacity, 
                 weekday_sdec_base_capacity,
                 weekend_sdec_base_capacity,
+                sdec_prob_threshold,
                 max_amu_available_beds,
                 mu_triage_assessment_time,
                 sigma_triage_assessment_time,
@@ -82,7 +83,7 @@ class GlobalParameters:
             self.proportion_direct_primary_care = proportion_direct_primary_care
 
             # Outcome thresholds
-            self.medical_referral_rate = medical_referral_rate
+            self.other_specialty_referral_rate = other_specialty_referral_rate
             self.paediatric_referral_rate = paediatric_referral_rate
         
             # Medicine discharge probabilities
@@ -115,6 +116,8 @@ class GlobalParameters:
             self.weekday_sdec_base_capacity = weekday_sdec_base_capacity
             self.weekend_sdec_base_capacity = weekend_sdec_base_capacity
         
+            self.sdec_prob_threshold = sdec_prob_threshold
+
             # Assessment times   
             self.mu_triage_assessment_time   = mu_triage_assessment_time
             self.sigma_triage_assessment_time = sigma_triage_assessment_time            

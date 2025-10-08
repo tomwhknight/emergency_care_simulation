@@ -1,8 +1,8 @@
 class Patient:
     """Class representing a patient in the system."""
     def __init__(self, env, patient_id, arrival_time, current_day, clock_hour, current_hour,
-                 source_of_referral, mode_arrival, age, adult, news2,
-                 admission_probability, acuity, sdec_appropriate, ed_disposition,
+                 source_of_referral, mode_arrival, age, adult, news2, referral_prob_cal, referral_score_raw, acuity, 
+                 sdec_appropriate, ed_disposition,
                  bloods_requested=False, 
                  bloods_ready_time = False,
                  priority=1):
@@ -21,7 +21,8 @@ class Patient:
         self.age = age
         self.adult = adult
         self.news2 = news2
-        self.admission_probability = admission_probability
+        self.referral_prob_cal = referral_prob_cal
+        self.referral_score_raw  = referral_score_raw
         self.acuity = acuity
         self.sdec_appropriate = sdec_appropriate
         self.ed_disposition = ed_disposition
