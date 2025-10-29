@@ -4,6 +4,7 @@ import pandas as pd
 from collections import defaultdict
 import os
 import datetime
+import json
 import numpy as np
 import math
 
@@ -118,6 +119,61 @@ def bern(p: float, rng) -> bool:
         return sum(activity_durations) / (g.getattr(resource_attribute) * g.sim_duration)
 
 
+def weighted_quantile(x, q, w=None):
+    """
+    Weighted quantile of x at quantile q in [0,1].
+    If w is None, falls back to np.quantile(x, q).
+    Notes:
+      - Drops non-finite x/w.
+      - Uses right-closed search so ties at the cutoff land in the upper group.
+    """
+    x = np.asarray(x, dtype=float)
+    if w is None:
+        return float(np.quantile(x, q))
+
+    w = np.asarray(w, dtype=float)
+
+    # drop non-finite
+    m = np.isfinite(x) & np.isfinite(w)
+    x = x[m]; w = w[m]
+
+    # guard: empty after filtering
+    if x.size == 0:
+        return float("nan")
+
+    order = np.argsort(x)
+    x_ord = x[order]
+    w_ord = w[order]
+
+    cw = np.cumsum(w_ord)                  # cumulative weight
+    cut = q * cw[-1]                       # target cumulative weight
+    i = int(np.searchsorted(cw, cut, side="right"))
+    i = min(max(i, 0), x_ord.size - 1)     # clamp into bounds
+    return float(x_ord[i])
+
+
+def dt_threshold_from_top_percent(p_raw, p_cal, top_percent):
+    """
+    Convert a single knob (top_percent, e.g. 10/25/50/75) into a p_raw cutoff.
+    Uses weighted quantile with weights = p_cal so “top X%” is with respect to
+    expected Medicine intent.
+
+    Returns: (threshold_value, policy_label)
+    """
+    try:
+        pct = float(top_percent)
+    except Exception:
+        pct = 0.0
+
+    pct = max(0.0, min(100.0, pct))  # clamp
+
+    if pct <= 0.0:
+        return (float("nan"), "clinical_only")
+
+    q = 1.0 - (pct / 100.0)  # top X% => quantile at 1 - X/100
+    th = weighted_quantile(p_raw, q, w=p_cal)
+    return (th, f"top{int(round(pct))}_raw_ge_{th:.3f}")
+
     # Rota math
 
     # --- Rota capacity helpers ---
@@ -211,7 +267,7 @@ def rota_to_dataframe(shift_patterns, end_cutoff=30):
     return df
 
 def save_rota_check(patterns, out_dir, filename="rota_check.csv",
-                    start_block=15, end_cutoff=45, resolution_minutes=1):
+                    start_block=0, end_cutoff=35, resolution_minutes=1):
     """
     Build and save a simple 24h availability table from `patterns` applying the same
     handover rules your sim uses. Does NOT rely on rota_peak(return_df=...).
@@ -254,4 +310,48 @@ def save_rota_check(patterns, out_dir, filename="rota_check.csv",
     df = pd.DataFrame(rows)
     path = os.path.join(out_dir, filename)
     df.to_csv(path, index=False)
+    return path
+
+
+def _to_jsonable(x):
+    # numpy scalars/arrays
+    if isinstance(x, (np.integer, np.floating)):
+        return x.item()
+    if isinstance(x, np.ndarray):
+        return x.tolist()
+    # sets
+    if isinstance(x, set):
+        return list(x)
+    # datetime types
+    if isinstance(x, (datetime.datetime, datetime.date, datetime.time)):
+        return x.isoformat()
+    return x
+
+def _obj_to_dict(obj):
+    if isinstance(obj, dict):
+        return {k: _obj_to_dict(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple, set, np.ndarray)):
+        return [_obj_to_dict(v) for v in list(obj)]
+    # Generic object with attributes (e.g., GlobalParameters)
+    try:
+        return {
+            k: _obj_to_dict(v)
+            for k, v in obj.__dict__.items()
+            if not k.startswith("_") and not callable(v)
+        }
+    except AttributeError:
+        return _to_jsonable(obj)
+
+def save_params(params_obj, folder, filename="params.json", extra=None):
+    """
+    Save parameters (and optional metadata) as JSON in `folder/filename`.
+    Returns the full path.
+    """
+    data = _obj_to_dict(params_obj)
+    if extra:
+        data.update(extra)
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, filename)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
     return path

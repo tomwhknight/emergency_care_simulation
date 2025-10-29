@@ -1,7 +1,7 @@
 # run.py
 
 
-USE_ALT_MODEL = True  # Set to False to use the original model
+USE_ALT_MODEL = False  # Set to False to use the original model
 
 if USE_ALT_MODEL:
     from src.trial_alt import AltTrial as Trial
@@ -17,12 +17,14 @@ import time
 from datetime import datetime
 import numpy as np
 import pandas as pd
+from os.path import basename
+
 
 # Import helpers
 
 from src.global_parameters import GlobalParameters
 from src.model import Model
-from src.helper import rota_peak, save_rota_check
+from src.helper import rota_peak, save_rota_check, save_params
 
 # --- Calculate peak capacity first ---
 
@@ -98,45 +100,32 @@ global_params = GlobalParameters(
     # Staffing resource
     ambulance_triage_nurse_capacity = 1,
     walk_in_triage_nurse_capacity = 3,
-    hca_capacity = 3, 
 
     medical_doctor_capacity = 5,
     consultant_capacity = 1, 
     shift_patterns_weekday = shift_patterns_weekday,
     shift_patterns_weekend = shift_patterns_weekend,
 
-    # Bloods
-    bloods_request_probability = 0.5,
-
     # SDEC capacity
     sdec_open_hour = 7, 
-    sdec_close_hour = 18,
+    sdec_close_hour = 17,
 
-    weekday_sdec_base_capacity = 5,
+    weekday_sdec_base_capacity = 6,
     weekend_sdec_base_capacity = 5, 
 
     # AMU capacity
-    max_amu_available_beds = 10,
+    max_amu_available_beds = 2,
     max_sdec_capacity = 5,
 
     # Service times
-    mu_triage_assessment_time = 1.8,
-    sigma_triage_assessment_time = 0.17,
+    mu_triage_assessment_time = 1.85,
+    sigma_triage_assessment_time = 0.4,
 
-    mu_blood_draw_time = 1.8,
-    sigma_blood_draw_time = 0.17,
+    mu_ed_service_time = 3.95, 
+    sigma_ed_service_time = 0.40, 
 
-    mu_blood_lab_time = 4.0,
-    sigma_blood_lab_time = 0.5,
-
-    mu_ed_service_time = 4.02, 
-    sigma_ed_service_time = 0.25, 
-
-    mu_ed_decision_time = 4.3, # 4.10
-    sigma_ed_decision_time = 0.6, # from 0.9
-
-    max_ed_service_time = 420,
-    min_ed_service_time = 0, 
+    mu_ed_decision_time = 4.20, 
+    sigma_ed_decision_time = 0.95, 
 
     mu_medical_service_time = 4.11,
     sigma_medical_service_time = 0.55,
@@ -149,20 +138,19 @@ global_params = GlobalParameters(
 
     # Routing logic
 
-    sdec_prob_threshold = 0.1,
-    other_specialty_referral_rate = 0.15,  # must be in [0,1]
-    paediatric_referral_rate = 0.1,
+    sdec_prob_threshold = 0.10,
+    paediatric_referral_rate = 0.10,
 
     initial_medicine_discharge_prob = 0.05,
     consultant_discharge_prob = 0.35,
 
     # Threshold for scerio analysis
 
-    direct_triage_threshold = None,
+    direct_triage_threshold = None, # Run None for no threshold applied
 
     # Simulation
 
-    simulation_time = 14400,
+    simulation_time = 44640,
     cool_down_time = 1440,
     burn_in_time = 2880)  # burn in to prevent initiation bias 
 
@@ -178,18 +166,21 @@ if __name__ == "__main__":
     
     t0 = time.perf_counter()
     info = trial.run(run_number=5)
+    elapsed = time.perf_counter() - t0
     
     # Create folder for each batch           
     # --- Create folder for each batch and include ED service parameters ---
     mu  = global_params.mu_ed_service_time
     sigma = global_params.sigma_ed_service_time
+    mu_dec = global_params.mu_ed_decision_time
+    sigma_dec = global_params.sigma_ed_decision_time
 
-    batch_label = f"batch_mu{mu:.2f}_sigma{sigma:.2f}"
+    batch_label = f"batch_mu{mu:.2f}_sigma{sigma:.2f}_mu{mu_dec:.2f}_sigma{sigma_dec:.2f}"
     batch_dir = os.path.join(info["scenario_dir"], batch_label)
     os.makedirs(batch_dir, exist_ok=True)
 
     # --- Print a quick summary to console ---
-    total_runs = info.get("total_runs", 5)   # fallback to what you passed in
+    total_runs = info.get("total_runs", 1)   # fallback to what you passed in
     secs_per_run = elapsed / max(1, total_runs)
     print(
         f" Runtime: {elapsed:,.1f}s "
@@ -197,10 +188,37 @@ if __name__ == "__main__":
         f"[seed={MASTER_SEED}]"
     )
 
-    # --- Append a lightweight timings log in the batch folder ---
-    os.makedirs(batch_dir, exist_ok=True)
+    # --- Save params (JSON) ---
+
+    params_filename = f"{basename(batch_dir)}.json"
+    save_params(
+        global_params,
+        batch_dir,
+        filename=params_filename,  # <- fixed typo
+        extra={
+            "master_seed": MASTER_SEED,
+            "created": datetime.now().isoformat(timespec="seconds"),
+            "elapsed_seconds": round(elapsed, 3),
+            "total_runs": total_runs,
+            "seconds_per_run": round(secs_per_run, 3),
+            "ed_service_params": {
+                "mu_ed_service_time": mu,
+                "sigma_ed_service_time": sigma,
+                "mu_ed_decision_time": mu_dec,
+                "sigma_ed_decision_time": sigma_dec,
+            },
+            "timing_windows": {
+                "burn_in_time": global_params.burn_in_time,
+                "cool_down_time": global_params.cool_down_time,
+                "simulation_time": global_params.simulation_time,
+            },
+        },
+    )
+
+    # --- Timings log (you were missing these two lines) ---
     timings_path = os.path.join(batch_dir, "timings.csv")
     header_needed = not os.path.exists(timings_path)
+
 
     with open(timings_path, "a", encoding="utf-8") as f:
         if header_needed:

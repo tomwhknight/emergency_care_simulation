@@ -21,6 +21,7 @@ class AltTrial:
         - alt_summary_daily.csv
         - alt_summary_complete.csv
         - alt_queue_ed_assessment.csv
+        - alt_queue_medical.csv
         - alt_queue_consultant.csv
         - alt_queue_amu.csv
         - alt_seed_manifest.csv
@@ -45,6 +46,11 @@ class AltTrial:
         self.agg_ed_assessment_queue_monitoring_df = pd.DataFrame(
             columns=["Simulation Time", "Hour of Day", "Queue Length"]
         )
+
+        self.agg_medical_queue_monitoring_df = pd.DataFrame(
+            columns=["Simulation Time", "Hour of Day", "Queue Length"]
+        )
+
         self.agg_consultant_queue_monitoring_df = pd.DataFrame(
             columns=["Simulation Time", "Hour of Day", "Queue Length"]
         )
@@ -88,9 +94,14 @@ class AltTrial:
         # Get scenario label exactly as AltModel will record it
         tmp_model = AltModel(self.global_params, burn_in_time, run_number=0)
         scenario_name = getattr(tmp_model, "_scenario_name", "alt")
+        label         = getattr(tmp_model, "_policy_label", "unlabelled")
 
         # Batch root for this set of runs
-        scenario_dir = os.path.join(self.base_output_dir, scenario_name, f"batch_{self.batch_id}")
+        scenario_dir = os.path.join(
+            self.base_output_dir,
+            scenario_name,                                 
+            f"batch_{self.batch_id}__{label}"              
+        )
         os.makedirs(scenario_dir, exist_ok=True)
 
         for i in range(run_number):
@@ -125,6 +136,12 @@ class AltTrial:
                 [self.agg_ed_assessment_queue_monitoring_df, ed_q], ignore_index=True
             )
 
+            med_q = model.medical_queue_monitoring_df.copy()
+            med_q["Run Number"] = run_idx
+            self.agg_medical_queue_monitoring_df = pd.concat(
+                [self.agg_medical_queue_monitoring_df, med_q], ignore_index=True
+            )
+
             cons_q = model.consultant_queue_monitoring_df.copy()
             cons_q["Run Number"] = run_idx
             self.agg_consultant_queue_monitoring_df = pd.concat(
@@ -151,6 +168,11 @@ class AltTrial:
         self.agg_consultant_queue_monitoring_df.to_csv(
             os.path.join(scenario_dir, "alt_queue_consultant.csv"), index=False
         )
+
+        self.agg_medical_queue_monitoring_df.to_csv(
+            os.path.join(scenario_dir, "alt_queue_medical.csv"), index=False
+        )
+
         self.agg_amu_queue_df.to_csv(
             os.path.join(scenario_dir, "alt_queue_amu.csv"), index=False
         )

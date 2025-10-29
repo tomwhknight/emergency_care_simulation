@@ -3,8 +3,6 @@ class Patient:
     def __init__(self, env, patient_id, arrival_time, current_day, clock_hour, current_hour,
                  source_of_referral, mode_arrival, age, adult, news2, referral_prob_cal, referral_score_raw, acuity, 
                  sdec_appropriate, ed_disposition,
-                 bloods_requested=False, 
-                 bloods_ready_time = False,
                  priority=1):
         
         # Store environment for SimPy events
@@ -27,14 +25,10 @@ class Patient:
         self.sdec_appropriate = sdec_appropriate
         self.ed_disposition = ed_disposition
         self.priority = priority
-
-        # Bloods logic
-        self.bloods_requested = bloods_requested
-        self.bloods_ready_time = bloods_ready_time
-        
-        # Event to signal when bloods are ready
-        self.bloods_ready = env.event()
         self.discharge_event = env.event()
+
+        self.dt_eligible = False         # Will be True if patient eligible for Direct Triage
+        self.pathway_start = "ED"        # Either "ED" or "Direct-Medicine"
 
        
         # Initialize AMU-related attributes

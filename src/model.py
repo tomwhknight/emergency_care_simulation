@@ -66,6 +66,17 @@ class Model:
             "NEWS2",
             "Referral Probability (Calibrated)",
             "Referral Score (Raw)",
+            "Referral Medicine",
+            "ED Pathway Subtype",
+            "DT Block Reason",
+
+
+            # --- Scenario / policy tagging ---
+            "Policy Label",
+            "DT Threshold",
+            "DT Eligible",
+            "Pathway Start",
+
             "Source of Referral",
             "Booked Appointment",
             "Mode of Arrival",
@@ -84,17 +95,6 @@ class Model:
             "SDEC Appropriate",
             "SDEC Accepted",
             "SDEC Decision Reason",
-
-            # --- Tests ---
-
-            "Bloods Requested",
-            "Queue Length Bloods",
-            "Request to Bloods Obtained",
-            "Arrival to Bloods Obtained",
-            "Arrival to Bloods Reported",
-            "Blood Draw Service Time",
-            "Blood Lab Service Time",
-            "Wait for Bloods After Assessment",
 
             # --- ED assessment ---
 
@@ -136,19 +136,16 @@ class Model:
         # Create results DataFrame with structured standard columns
         self.run_results_df = pd.DataFrame(columns=self.standard_cols)
         self.run_results_df = self.run_results_df.set_index("Patient ID")
+ 
 
         # --- Baseline scenario defaults so Trial/AltTrial can tag outputs ---
         self._scenario_name = "baseline"
         self._dt_threshold  = np.nan  # baseline has no direct-triage threshold
 
-        # ⇩ Add scenario/triage experiment columns (no need to touch standard_cols)
-        for c in ["Scenario", "DT Threshold", "DT Eligible", "Pathway Start"]:
-            if c not in self.run_results_df.columns:
-                self.run_results_df[c] = np.nan
-
        # --- Buffers (fast) ---
         self._event_log_buf = []
         self._ed_q_buf = []
+        self._med_q_buf = []
         self._cons_q_buf = []
         self._amu_q_buf = []
         self._ed_block_buf = []
@@ -156,6 +153,7 @@ class Model:
         # Placeholders so attributes exist before run()
         self.event_log_df = pd.DataFrame(columns=["run_number","patient_id","event","timestamp"])
         self.ed_assessment_queue_monitoring_df = pd.DataFrame(columns=["Simulation Time","Hour of Day","Queue Length"])
+        self.medical_queue_monitoring_df = pd.DataFrame(columns=["Simulation Time","Hour of Day","Queue Length"])
         self.consultant_queue_monitoring_df = pd.DataFrame(columns=["Simulation Time","Hour of Day","Queue Length"])
         self.amu_queue_df = pd.DataFrame(columns=["Time","Queue Length"])  # ← use Time (see note below)
         self.ed_doctor_block_monitoring_df = pd.DataFrame(columns=[
@@ -167,7 +165,6 @@ class Model:
         # Create simpy resources for staffing levels
         self.ambulance_triage_nurse = simpy.Resource(self.env, capacity=self.global_params.ambulance_triage_nurse_capacity)
         self.walk_in_triage_nurse = simpy.PriorityResource(self.env, capacity = self.global_params.walk_in_triage_nurse_capacity)
-        self.hca = simpy.PriorityResource(self.env, capacity = self.global_params.hca_capacity)
         self.ed_doctor = simpy.PriorityResource(self.env, capacity=self.global_params.max_ed_doctor_capacity)
         self.medical_doctor = simpy.PriorityResource(self.env, capacity=self.global_params.medical_doctor_capacity)
         self.consultant = simpy.PriorityResource(self.env, capacity=self.global_params.consultant_capacity)
@@ -175,7 +172,6 @@ class Model:
         
         # Create list to enforce rota blocks
         self._rota_blockers = []   # list of (process, stop_event)
-
 
         # Initialize the AMU bed container
         self.amu_beds = simpy.Store(self.env, capacity = self.global_params.max_amu_available_beds)
@@ -189,6 +185,7 @@ class Model:
         if self.env.now > self.burn_in_time:
             if column in self.run_results_df.columns and patient_id in self.run_results_df.index:
                 self.run_results_df.at[patient_id, column] = value
+
 
     # Method to add results to an event log for BUPAR
     def record_event(self, patient, event_name):
@@ -275,12 +272,17 @@ class Model:
 
             # Referral and Admission Probabilities
             
-            # --- Paired draw: pick one row and take both calibrated and raw ---
-            idx = int(self.rng_probs.integers(self._p_n))
-            referral_prob_cal = float(self._p_cal[idx])   # calibrated (prevalence-matched)
-            referral_score_raw = float(self._p_raw[idx])  # raw score for ranking    
+            idx = None
+            referral_prob_cal  = np.nan
+            referral_score_raw = np.nan
+            if adult:
+                idx = int(self.rng_probs.integers(self._p_n))
+                referral_prob_cal  = float(self._p_cal[idx])   # calibrated: referral to ANY specialty
+                referral_score_raw = float(self._p_raw[idx])   # raw score (optional)
+ 
+            
+            # SDEC appropriate
 
-           # SDEC appropriate
             if adult:
                 if (acuity not in [1, 2]) and (news2 < 4) and (referral_prob_cal < self.global_params.sdec_prob_threshold):
                     sdec_appropriate = True
@@ -319,6 +321,15 @@ class Model:
                 priority=priority
                 )
 
+            # --- Draw "intent to refer to ANY specialty" (adult-only) ---
+            if adult and not np.isnan(referral_prob_cal):
+                # IMPORTANT: this now means "ANY referral", not "medicine"
+                patient.referral_intent = bern(referral_prob_cal, self.rng_probs)
+                # (Optional) record under a clearer column name if you add one:
+                # self.record_result(patient.id, "Referral Any Specialty Intent", bool(patient.medicine_intent))
+            else:
+                patient.referral_intent = False
+    
             # Initialise a dictionary of patient results 
 
             patient_results = {
@@ -336,8 +347,16 @@ class Model:
             "Booked Appointment": "",
             "Acuity": acuity,
             "Referral Probability (Calibrated)": referral_prob_cal,              # new
-            "Referral Score (Raw)": referral_score_raw,    
-
+            "Referral Score (Raw)": referral_score_raw,  
+            "Referral Medicine": "",
+            "ED Pathway Subtype": "",
+            "DT Block Reason": "",
+            "Scenario": "",
+            "Policy Label": "",
+            "DT Threshold": np.nan,
+            "DT Eligible": np.nan,
+            "Pathway Start": "",
+         
 
             # --- Triage-Related Metrics ---
             "Queue Length Walk in Triage Nurse": np.nan,
@@ -349,14 +368,6 @@ class Model:
             "SDEC Appropriate": sdec_appropriate,
             "SDEC Accepted": np.nan,
             "SDEC Decision Reason": "",
-
-            # --- Test related metrics ---
-
-            "Bloods Requested": "",
-            "Arrival to Bloods Reported": np.nan,
-            "Blood Draw Service Time": np.nan,
-            "Bloods Lab Service Time": np.nan, 
-            "Wait for Bloods After Assessment": np.nan,
 
             # --- ED Assessment Metrics ---
             "Queue Length ED doctor": np.nan,
@@ -431,11 +442,13 @@ class Model:
             # Use your model RNG if you have one (preferred for reproducibility)
             is_booked = bern(booked_appointment_prob, self.rng_probs)
             self.record_result(patient.id, "Booked Appointment", bool(is_booked))
+            self.record_result(patient.id, "Discharge Decision Point", "booked_appointment")
+
+
 
             if is_booked:
                 log(lambda: f"[{self.env.now:.2f}] Patient {patient.id} has a booked appointment; no ED triage.")
     
-
             else:    
                 if mode_of_arrival == "Ambulance":
                     log(lambda: f"Ambulance Patient {patient.id} arrives at {arrival_time}")
@@ -569,6 +582,8 @@ class Model:
 
     # Method to monitor the consultant queue
     def monitor_ed_assessment_queue_length(self, interval=60):
+
+
         """Monitor ED assessment queue length (patients only) at regular intervals."""
         while True:
             current_time = self.env.now
@@ -586,6 +601,21 @@ class Model:
                 "Queue Length": queue_length,
             })
 
+            yield self.env.timeout(interval)
+ 
+    # Method to monitor the medical queue
+    def monitor_medical_queue_length(self, interval=60):
+        """Monitor medical queue length at regular intervals (buffered)."""
+        while True:
+            current_time = self.env.now
+            hour_of_day = int((current_time // 60) % 24)
+            queue_length = len(self.medical_doctor.queue)
+
+            self._med_q_buf.append({
+                "Simulation Time": current_time,
+                "Hour of Day":     hour_of_day,
+                "Queue Length":    queue_length,
+            })
             yield self.env.timeout(interval)
 
     # Method to monitor ED doctor blocking
@@ -828,8 +858,7 @@ class Model:
                 self._count_active_blockers(self.ed_doctor, "rota") +
                 self._count_active_blockers(self.ed_doctor, "break")
             )
-            log(lambda: f"[{now:6.1f}] ROTA CTRL desired={desired:2d} phys={phys_cap:2d} "
-                f"target_rota={target_rota_blockers:2d} | eff_before={eff_before:2d}")
+
 
             # Level to the target (add/remove persistent blockers)
             self._sync_rota_blockers(target_rota_blockers)
@@ -843,8 +872,7 @@ class Model:
             eff_after = phys_cap - (active_rota + active_break)
             # what we "should" see once breaks are considered
             should_starters = max(0, desired - active_break)
-            log(lambda: f"[{self.env.now:6.1f}] ROTA CTRL eff_after={eff_after:2d} "
-                f"(should≈{should_starters:2d}; desired={desired:2d}, breaks={active_break})")
+      
 
             yield self.env.timeout(tick)
 
@@ -1006,15 +1034,13 @@ class Model:
 
             # Check if the current time is within the off-duty period (21:00–07:00)
             if current_hour >= 20 or current_hour < 7:
-                log(lambda: f"{self.env.now:.2f}: Consultants are off-duty (21:00–07:00).")
+
                 with self.consultant.request(priority=-1) as req:
                     yield req  # Block the resource
                     yield self.env.timeout(60)  # Hold the block for 1 hour
+            
             else:
-                log(lambda: f"{self.env.now:.2f}: Consultants are available.")
-
-            # Wait until the next hour to check again
-            yield self.env.timeout(60)
+                yield self.env.timeout(60)
     
     # Method to refer to sdec
     def refer_to_sdec(self, patient, fallback_process):
@@ -1025,7 +1051,7 @@ class Model:
             self.record_result(patient.id, "SDEC Decision Reason", "Rejected: Paediatric")
             yield self.env.process(fallback_process(patient))
             return
-        
+ 
         # Check Acuity
         if not patient.sdec_appropriate:
             self.record_result(patient.id, "SDEC Accepted", False)
@@ -1071,11 +1097,14 @@ class Model:
     # Simulate triage process
 
     def walk_in_triage(self, patient):
+        
         """Simulate triage assessment for walk ins"""
         log(lambda: f"Walk-in Triage Queue at time of request: {len(self.walk_in_triage_nurse.queue)} patients at time {self.env.now}")
+        
         with self.walk_in_triage_nurse.request() as req:
+            
             yield req # Wait until a triage nurse is available
-             # Record the queue length
+            # Record the queue length
             self.record_result(patient.id, "Queue Length Walk in Triage Nurse", len(self.walk_in_triage_nurse.queue))
 
             # Record the start time of ED assessment
@@ -1097,28 +1126,16 @@ class Model:
             self.record_result(patient.id, "Triage Nurse Assessment Service Time", triage_nurse_assessment_time)
             patient.triage_nurse_assessment_time = triage_nurse_assessment_time 
 
-            # Decide if blood tests are needed based on admission probability  
-            if bern(self.global_params.bloods_request_probability, self.rng_probs):
-
-                self.record_result(patient.id, "Bloods Requested", "Yes")
-                yield self.env.process(self.tests_draw(patient))
-                patient.bloods_requested = True
-                patient.bloods_requested_at_triage = True
-            else:
-                self.record_result(patient.id, "Bloods Requested", "No")
-                patient.bloods_requested = False
-                patient.bloods_requested_at_triage = False
-
-
          # After triage, proceed to SDEC referral process (with ED assessment as fallback)
         yield self.env.process(self.refer_to_sdec(patient, fallback_process = self.ed_assessment))
 
     def ambulance_triage(self, patient):
         """Simulate triage assessment for Ambulance"""    
         with self.ambulance_triage_nurse.request() as req:
-            yield req # Wait until a triage nurse is available
-             # Record the queue length
             self.record_result(patient.id, "Queue Length Ambulance Triage Nurse", len(self.ambulance_triage_nurse.queue))
+            yield req # Wait until a triage nurse is available
+            # Record the queue length
+            
 
             # Record the start time of ED assessment
             triage_nurse_assessment_start_time = self.env.now
@@ -1131,69 +1148,15 @@ class Model:
             mean=self.global_params.mu_triage_assessment_time,
             sigma=self.global_params.sigma_triage_assessment_time
             )
+
+            yield self.env.timeout(triage_nurse_assessment_time)
             
             # Record triage assessment time in the results 
             self.record_result(patient.id, "Triage Nurse Assessment Service Time", triage_nurse_assessment_time)
             patient.triage_nurse_assessment_time = triage_nurse_assessment_time 
 
-            # Decide if blood tests are needed based on admission probability   
-            if bern(self.global_params.bloods_request_probability, self.rng_probs):
-
-                self.record_result(patient.id, "Bloods Requested", "Yes")
-                yield self.env.process(self.tests_draw(patient))
-                patient.bloods_requested = True
-                patient.bloods_requested_at_triage = True
-            else:
-                self.record_result(patient.id, "Bloods Requested", "No")
-                patient.bloods_requested = False
-                patient.bloods_requested_at_triage = False
-
         # After triage, proceed ED assessment
         yield self.env.process(self.refer_to_sdec(patient, fallback_process = self.ed_assessment))
-
-    # Simulate bloods tests
-    def tests_draw(self, patient):
-        """Simulate an HCA drawing tests after triage."""
-        with self.hca.request() as req:
-            self.record_result(patient.id, "Queue Length Bloods", len(self.hca.queue))
-            yield req
-            
-            # Sample test draw duration
-            blood_draw_duration = self.rng_service.lognormal(
-            mean=self.global_params.mu_blood_draw_time,
-            sigma=self.global_params.sigma_blood_draw_time
-            )
-            
-            time_bloods_obtained = self.env.now
-            arrival_to_obtained = time_bloods_obtained - patient.arrival_time    
-
-            self.record_result(patient.id, "Blood Draw Service Time", blood_draw_duration)
-            self.record_result(patient.id, "Arrival to Bloods Obtained", arrival_to_obtained)
-            
-            log(lambda: f"[{self.env.now:.2f}] Patient {patient.id} Blood test draw complete.")
-
-        # After draw, proceed to lab processing
-        self.env.process(self.tests_lab(patient)) 
-
-    def tests_lab(self, patient):
-        """Simulate lab processing time for test results."""
-        lab_duration = self.rng_service.lognormal(
-                mean=self.global_params.mu_blood_lab_time,
-                sigma=self.global_params.sigma_blood_lab_time
-            )
-        
-        yield self.env.timeout(lab_duration)
-        
-        blood_complete_time = self.env.now
-        patient.bloods_ready_time = blood_complete_time 
-
-        total_test_time = blood_complete_time - patient.arrival_time
-        self.record_result(patient.id, "Blood Lab Service Time", lab_duration)
-        self.record_result(patient.id, "Arrival to Bloods Reported", total_test_time)
-        log(lambda: f"[{self.env.now:.2f}] Patient {patient.id} lab results available.")
-
-        if not patient.bloods_ready.triggered:
-            patient.bloods_ready.succeed()
     
     # Simulate ED assessment process
     def ed_assessment(self, patient):
@@ -1223,6 +1186,7 @@ class Model:
                 mean=self.global_params.mu_ed_service_time,
                 sigma=self.global_params.sigma_ed_service_time
             )
+            
             decision_time_sample = self.rng_service.lognormal(
                 mean=self.global_params.mu_ed_decision_time,
                 sigma=self.global_params.sigma_ed_decision_time
@@ -1253,44 +1217,32 @@ class Model:
             if admitted:
                 patient.ed_disposition = "Refer - Paeds"
             else:
-                # Discharge → may need to wait for bloods
-                if patient.bloods_ready_time > self.env.now:
-                    wait_time = patient.bloods_ready_time - self.env.now
-                    yield self.env.timeout(wait_time)
-                    self.record_result(patient.id, "Wait for Bloods After Assessment", wait_time)
-                    log(lambda: f"[{self.env.now:.2f}] Patient {patient.id} blood results available.")
-                else:
-                    self.record_result(patient.id, "Wait for Bloods After Assessment", 0)
-                patient.ed_disposition = "Discharge"
+                patient.ed_disposition = "Discharge - Paeds"
 
         else:
+            # Here, referral_intent == True means "referred to ANY specialty" for adults
 
-            # --- Medicine-calibrated decision ---
-            referred_medicine = bern(patient.referral_prob_cal, self.rng_probs)
-
-            if referred_medicine:
-                # p_cal targets Medicine specifically → go straight to Medicine
-                patient.ed_disposition = "Refer - Medicine"
-
-            else:
-                # Among the non-Medicine remainder, split Other vs Discharge
-                referred_other = bern(self.global_params.other_specialty_referral_rate, self.rng_probs)
-                if referred_other:
-                    patient.ed_disposition = "Refer - Other Speciality"
+            if patient.referral_intent:
+                # Per-patient random split around 50% for Medicine vs Other
+                # Normal(0.5, 0.05); clamp to [0,1] so it's a valid probability
+                
+                medicine_share = float(np.clip(self.rng_probs.normal(loc=0.55, scale=0.05), 0.0, 1.0))
+                
+                if self.rng_probs.random() < medicine_share:
+                    patient.ed_disposition = "Refer - Medicine"
+                    self.record_result(patient.id, "Referral Medicine", True)
                 else:
-                    # Discharge → may need to wait for bloods
-                    if patient.bloods_ready_time > self.env.now:
-                        wait_time = patient.bloods_ready_time - self.env.now
-                        yield self.env.timeout(wait_time)
-                        self.record_result(patient.id, "Wait for Bloods After Assessment", wait_time)
-                    else:
-                        self.record_result(patient.id, "Wait for Bloods After Assessment", 0)
-                    patient.ed_disposition = "Discharge"
-
-        self.record_result(patient.id, "ED Disposition", patient.ed_disposition)
+                    patient.ed_disposition = "Refer - Other Speciality"
+                    self.record_result(patient.id, "Referral Medicine", False)
+            else:
+                # No referral to ANY specialty → discharge from ED
+                patient.ed_disposition = "Discharge"
+                self.record_result(patient.id, "Referral Medicine", False)
 
         # --- Handle outcome ---
         outcome = patient.ed_disposition
+        self.record_result(patient.id, "ED Disposition", patient.ed_disposition)
+        
         if outcome == "Discharge":
             finalise_disposition(patient, "ed_discharge", "discharge")
             return
@@ -1309,7 +1261,7 @@ class Model:
             self.record_result(patient.id, "Arrival to Referral", total_time_referral)
             self.record_event(patient, "referral_to_medicine")
             yield self.env.process(self.handle_ed_referral(patient))
-      
+
     def handle_ed_referral(self, patient):
         """Handles referral after ED assessment when SDEC is rejected.
         Ensures patient is referred to AMU queue while also starting medical assessment."""
@@ -1525,6 +1477,9 @@ class Model:
         # Start monitoring ED doctor blocking
         self.env.process(self.monitor_ed_doctor_blocks(interval=15))
 
+        # Start monitoring the medical doctor queue
+        self.env.process(self.monitor_medical_queue_length())
+
         # Start monitoring the consultant queue
         self.env.process(self.monitor_consultant_queue_length())
 
@@ -1551,6 +1506,8 @@ class Model:
             self.event_log_df = pd.DataFrame(self._event_log_buf)
         if getattr(self, "_ed_q_buf", None):
             self.ed_assessment_queue_monitoring_df = pd.DataFrame(self._ed_q_buf)
+        if getattr(self, "_med_q_buf", None):
+            self.medical_queue_monitoring_df = pd.DataFrame(self._med_q_buf)
         if getattr(self, "_cons_q_buf", None):
             self.consultant_queue_monitoring_df = pd.DataFrame(self._cons_q_buf)
         if getattr(self, "_ed_block_buf", None):
@@ -1565,197 +1522,101 @@ class Model:
         self.run_results_df['Breach 12hr'] = self.run_results_df['Time in System'].gt(720)
 
         # Tag for binding across scenarios
-        self.run_results_df.loc[:, "Scenario"]      = self._scenario_name
-        self.run_results_df.loc[:, "DT Threshold"]  = self._dt_threshold
-        self.run_results_df["DT Eligible"]          = self.run_results_df["DT Eligible"].fillna(False)
-        self.run_results_df["Pathway Start"]        = self.run_results_df["Pathway Start"].fillna("ED")
+        self.run_results_df.loc[:, "Scenario"]     = getattr(self, "_scenario_name", "baseline")
+        self.run_results_df.loc[:, "Policy Label"] = getattr(self, "_policy_label", "")
+        self.run_results_df.loc[:, "DT Threshold"] = getattr(self, "_dt_threshold", np.nan)
 
     def outcome_measures(self):
-
-        # Remove cool down to prevent termination bias
+        """
+        Return only a per-run 'complete' summary with simple measures.
+        No hourly/daily, no calibration, no DT fields, no scenario/threshold tagging.
+        """
         obs_start = self.global_params.burn_in_time
         obs_end   = self.global_params.simulation_time - self.global_params.cool_down_time
 
-        copy = self.run_results_df.copy()
-        copy = copy[(copy["Simulation Arrival Time"] >= obs_start) &
-            (copy["Simulation Arrival Time"] <  obs_end)]
+        df = self.run_results_df
+        if df.empty:
+            out = pd.DataFrame(columns=["measure", "mean_value", "run_number"])
+            self.results_complete = out
+            return out
 
-         # Window length (days) for rate normalisation
-        window_minutes = max(obs_end - obs_start, 1)
+        # Filter to observation window
+        copy = df[(df["Simulation Arrival Time"] >= obs_start) &
+                (df["Simulation Arrival Time"] <  obs_end)].copy()
+
+        # Window length (days) for rate normalisation
+        window_minutes  = max(obs_end - obs_start, 1)
         simulation_days = window_minutes / 1440.0
-        total_attendances = len(copy)
-        attendances_per_day = total_attendances / simulation_days
 
-        #  Normalise DT fields for summaries ---
-        # (baseline will have NaNs → treat as False / ED)
-        copy["DT Eligible"] = copy.get("DT Eligible", False)
-        copy["DT Eligible"] = copy["DT Eligible"].fillna(False)
-        copy["Pathway Start"] = copy.get("Pathway Start", "ED").fillna("ED")
-
-        # Aggregate by Hour
-        hourly_data = copy.groupby(['Hour of Arrival']).agg({
-            'Arrival to Triage Nurse Assessment': ['mean'],
-            'Arrival to ED Assessment': ['mean'],
-            'Arrival to Referral': ['mean'],
-            'Arrival to Medical Assessment': ['mean'],
-            'Arrival to Consultant Assessment': ['mean'], 
-            'SDEC Appropriate': ['mean'],
-            'SDEC Accepted': ['mean'], 
-            'Time in System': ['mean'], 
-            'Breach 4hr': ['mean'],
-            'Breach 12hr': ['mean'],
-            # Add additional measures as necessary
-        }).reset_index()
-
-        # Rename columns for clarity
-        hourly_data.columns = ['hour_of_arrival', 'mean_arrival_triage', 'mean_arrival_ed',
-                           'mean_arrival_referral', 'arrival_medical_assessment',
-                           'mean_arrival_consultant_assessment', 'prop_sdec_appropriate', 'prop_sdec_accepted',  'time_in_ed',  'prop_>4hr_breach', 'prop_>12hr_breach']
-
-        # Aggregate by Day
-        daily_data = copy.groupby(['Day of Arrival']).agg({
-            'Arrival to Triage Nurse Assessment': ['mean'],
-            'Arrival to ED Assessment': ['mean'],
-            'Arrival to Referral': ['mean'],
-            'Arrival to Medical Assessment': ['mean'],
-            'Arrival to Consultant Assessment': ['mean'],
-            'SDEC Appropriate': ['mean'],
-            'SDEC Accepted': ['mean'],  
-            'Time in System': ['mean'],  
-            'Breach 4hr': ['mean'],
-            'Breach 12hr': ['mean'],
-        }).reset_index()
-
-        # Rename columns for clarity
-        daily_data.columns = ['day_of_arrival', 'mean_arrival_triage', 'mean_arrival_ed',
-                           'mean_arrival_referral', 'arrival_medical_assessment',
-                           'mean_arrival_consultant_assessment', 'sdec_appopriate', 'prop_sdec_accepted', 'time_in_ed', 'prop_>4hr_breach', 'prop_>12hr_breach']
-
-        # Now, aggregate across all runs
-        complete_data = copy.agg({
-            'Arrival to Triage Nurse Assessment': ['mean'],
-            'Arrival to ED Assessment': ['mean'],
-            'Arrival to Referral': ['mean'],
-            'Arrival to Medical Assessment': ['mean'],
-            'Arrival to Consultant Assessment': ['mean'],
-            'SDEC Appropriate': ['mean'],
-            'SDEC Accepted': ['mean'],
-            'Time in System': ['mean'],  
-            'Breach 4hr': ['mean'],
-            'Breach 12hr': ['mean'],
-        }).T.reset_index()
-
-        complete_data.columns = ['measure', 'mean_value']
-
-        # Append attendances per day as summary row
-        attendance_row = pd.DataFrame([["Mean ED Attendances per Day", attendances_per_day]], columns=["measure", "mean_value"])
-        complete_data = pd.concat([complete_data, attendance_row], ignore_index=True)
-
-        # Add proportion referred to Medicine
-        prop_medicine = copy['ED Disposition'].value_counts(normalize=True).get("Refer - Medicine", 0)
-        complete_data.loc[len(complete_data.index)] = ['Proportion Referred - Medicine', prop_medicine]
-
-         # Add SDEC appropriate
-        sdec_appropriate = copy[copy["SDEC Appropriate"] == True]
-        if len(sdec_appropriate) > 0:
-                prop_sdec_accepted_among_appropriate = sdec_appropriate["SDEC Accepted"].mean()
+        # Ensure columns exist with NA-friendly dtypes
+        if "SDEC Accepted" not in copy:
+            copy["SDEC Accepted"] = pd.Series(False, index=copy.index, dtype="boolean")
         else:
-            prop_sdec_accepted_among_appropriate = None  # or np.nan
+            copy["SDEC Accepted"] = copy["SDEC Accepted"].astype("boolean")
 
-        sdec_row = pd.DataFrame(
-            [["SDEC Accepted (of Appropriate)", prop_sdec_accepted_among_appropriate]],
-                columns=["measure", "mean_value"]
-            )
-        
-        complete_data = pd.concat([complete_data, sdec_row], ignore_index=True)
+        if "ED Disposition" not in copy:
+            copy["ED Disposition"] = pd.Series(pd.NA, index=copy.index, dtype="string")
+        else:
+            copy["ED Disposition"] = copy["ED Disposition"].astype("string")
+
+        # Flags (no dtype churn)
+        copy["referred_medicine"]  = (copy["ED Disposition"].fillna("") == "Refer - Medicine").astype("Int64")
+        copy["sdec_accepted_flag"] = copy["SDEC Accepted"].fillna(False).astype("Int64")
 
 
-        # p_cal targets adult Medicine referral. Exclude SDEC Accepted so we only look at the ED decision.
-        adults  = copy[copy["Adult"] == True]
-        ed_only = adults[adults["ED Disposition"] != "SDEC Accepted"].copy()
+        # Mean-type measures (include only existing columns)
+        mean_candidates = [
+            "Arrival to Triage Nurse Assessment",
+            "Arrival to ED Assessment",
+            "Arrival to Referral",
+            "Arrival to Medical Assessment",
+            "Arrival to Consultant Assessment",
+            "SDEC Appropriate",
+            "SDEC Accepted",
+            "Time in System",
+            "Breach 4hr",
+            "Breach 12hr",
+        ]
+        mean_cols = [c for c in mean_candidates if c in copy.columns]
+        if mean_cols:
+            complete_data = (copy[mean_cols]
+                            .mean(numeric_only=True)
+                            .to_frame("mean_value")
+                            .reset_index()
+                            .rename(columns={"index": "measure"}))
+        else:
+            complete_data = pd.DataFrame(columns=["measure", "mean_value"])
 
-        mean_pcal = ed_only["Referral Probability (Calibrated)"].mean()
-        obs_med   = (ed_only["ED Disposition"] == "Refer - Medicine").mean() if len(ed_only) else np.nan
-        gap       = (obs_med - mean_pcal) if len(ed_only) else np.nan
-
-        not_med = ed_only[ed_only["ED Disposition"] != "Refer - Medicine"]
-        other_given_not_med = (
-            (not_med["ED Disposition"] == "Refer - Other Speciality").mean()
-            if len(not_med) else np.nan
+        # Attendances per day
+        attendances_per_day = len(copy) / simulation_days if simulation_days else float("nan")
+        complete_data = pd.concat(
+            [complete_data,
+            pd.DataFrame([["Mean ED Attendances per Day", attendances_per_day]],
+                        columns=["measure", "mean_value"])],
+            ignore_index=True
         )
 
-        # Append summary rows to the existing complete_data (so it lands in baseline_summary_complete.csv)
-        cal_rows = pd.DataFrame([
-            ["Mean p_cal (Adults, ED-only)", mean_pcal],
-            ["Observed P(Medicine) (Adults, ED-only)", obs_med],
-            ["Observed - p_cal (Adults, ED-only)", gap],
-            ["P(Other | not Medicine) (Adults, ED-only)", other_given_not_med],
-        ], columns=["measure", "mean_value"])
-        
-        complete_data = pd.concat([complete_data, cal_rows], ignore_index=True)
-
-        # Build a decile table for monotonicity (Adults, ED-only)
-        if len(ed_only):
-            ed_only = ed_only.copy()
-            ed_only["pcal_decile"] = pd.qcut(
-                ed_only["Referral Probability (Calibrated)"],
-                10, labels=False, duplicates="drop"
-            )
-            calib_deciles = (ed_only
-                .groupby("pcal_decile", observed=True)
-                .agg(
-                    mean_p_cal=("Referral Probability (Calibrated)", "mean"),
-                    obs_prop_medicine=("ED Disposition", lambda s: (s == "Refer - Medicine").mean()),
-                    n=("ED Disposition", "size"),
-                )
-                .reset_index()
-                .sort_values("pcal_decile"))
+        # Proportion referred to Medicine (if available)
+        if "ED Disposition" in copy.columns and len(copy):
+            prop_medicine = (copy["ED Disposition"] == "Refer - Medicine").mean()
         else:
-            calib_deciles = pd.DataFrame(columns=["pcal_decile","mean_p_cal","obs_prop_medicine","n"])
+            prop_medicine = float("nan")
+        complete_data.loc[len(complete_data)] = ["Proportion Referred - Medicine", prop_medicine]
 
-
-        # --- Direct-triage summaries ---
-
-        dt_eligible_share = copy["DT Eligible"].mean() if len(copy) else np.nan
-        dt_used_share = (copy["Pathway Start"] == "Direct-Medicine").mean() if len(copy) else np.nan
-        complete_data = pd.concat([
-            complete_data,
+        # Per-day totals from helper flags
+        referred_per_day = copy["referred_medicine"].sum()  / simulation_days if simulation_days else float("nan")
+        sdec_per_day     = copy["sdec_accepted_flag"].sum() / simulation_days if simulation_days else float("nan")
+        complete_data = pd.concat(
+            [complete_data,
             pd.DataFrame([
-                ["Direct Triage Eligible (share)", dt_eligible_share],
-                ["Direct Triage Used (share)", dt_used_share],
-            ], columns=["measure", "mean_value"])
-        ], ignore_index=True)
+                ["Referred - Medicine (per day)", referred_per_day],
+                ["SDEC Accepted (per day)",       sdec_per_day],
+            ], columns=["measure","mean_value"])],
+            ignore_index=True
+        )
 
-        # Store the aggregated results
-        hourly_data["run_number"]  = self.run_number
-        daily_data["run_number"]   = self.run_number
+        # Tag with run_number only
         complete_data["run_number"] = self.run_number
 
-        scenario = getattr(self, "_scenario_name", "baseline")
-        thresh   = getattr(self, "_dt_threshold", np.nan)
-        for df in (hourly_data, daily_data, complete_data):
-            df["Scenario"] = scenario
-            df["DT Threshold"] = thresh
-
-        # Tag & expose calibration tables for the Trial to aggregate/save
-        calib_deciles["run_number"]  = self.run_number
-        calib_deciles["Scenario"]    = scenario
-        calib_deciles["DT Threshold"] = thresh
-        self.calibration_deciles = calib_deciles
-
-        calib_summary = cal_rows.copy()
-        calib_summary["run_number"]  = self.run_number
-        calib_summary["Scenario"]    = scenario
-        calib_summary["DT Threshold"] = thresh
-        self.calibration_summary = calib_summary
-
-        self.results_hourly   = hourly_data
-        self.results_daily    = daily_data
         self.results_complete = complete_data
-
-        self.results_hourly = hourly_data
-        self.results_daily = daily_data
-        self.results_complete = complete_data
-    
-        return hourly_data, daily_data, complete_data
-    
+        return complete_data

@@ -21,6 +21,7 @@ class Trial:
         - baseline_summary_daily.csv
         - baseline_summary_complete.csv
         - baseline_queue_ed_assessment.csv
+        - baelines_initial_medicine.csv
         - baseline_queue_consultant.csv
         - baseline_queue_amu.csv
         - baseline_seed_manifest.csv
@@ -42,9 +43,15 @@ class Trial:
         self.agg_results_hourly = pd.DataFrame()
         self.agg_results_daily = pd.DataFrame()
         self.agg_results_complete = pd.DataFrame()
+        
         self.agg_ed_assessment_queue_monitoring_df = pd.DataFrame(
             columns=["Simulation Time", "Hour of Day", "Queue Length"]
         )
+        
+        self.agg_medical_queue_monitoring_df = pd.DataFrame(
+            columns=["Simulation Time", "Hour of Day", "Queue Length"]
+        )
+        
         self.agg_consultant_queue_monitoring_df = pd.DataFrame(
             columns=["Simulation Time", "Hour of Day", "Queue Length"]
         )
@@ -56,6 +63,13 @@ class Trial:
             "Effective Capacity", "Active Patient Users", "Patient Queue Length",
             "Desired From Rota", "Run Number"
         ])
+
+        self.agg_calibration_summary = pd.DataFrame(
+            columns=["measure","mean_value","run_number","Scenario","DT Threshold"]
+        )
+        self.agg_calibration_deciles = pd.DataFrame(
+            columns=["pcal_decile","mean_p_cal","obs_prop_medicine","n","run_number","Scenario","DT Threshold"]
+        )
         
         # Record RNG seeds
         self.seed_manifest = []
@@ -88,6 +102,8 @@ class Trial:
         scenario_dir = os.path.join(self.base_output_dir, "baseline", f"batch_{self.batch_id}")
         os.makedirs(scenario_dir, exist_ok=True)
 
+        buf_complete = []
+
         for i in range(run_number):
             run_idx = i + 1
             print(f"[BASELINE] Run {run_idx}/{run_number} | batch={self.batch_id}")
@@ -108,16 +124,20 @@ class Trial:
             self.agg_event_log = pd.concat([self.agg_event_log, model.event_log_df], ignore_index=True)
 
             # Summaries
-            hourly, daily, complete = model.outcome_measures()
-            self.agg_results_hourly = pd.concat([self.agg_results_hourly, hourly], ignore_index=True)
-            self.agg_results_daily = pd.concat([self.agg_results_daily, daily], ignore_index=True)
-            self.agg_results_complete = pd.concat([self.agg_results_complete, complete], ignore_index=True)
+            complete = model.outcome_measures()
+            buf_complete.append(complete)
 
             # Queues (tag with run for traceability)
             ed_q = model.ed_assessment_queue_monitoring_df.copy()
             ed_q["Run Number"] = run_idx
             self.agg_ed_assessment_queue_monitoring_df = pd.concat(
                 [self.agg_ed_assessment_queue_monitoring_df, ed_q], ignore_index=True
+            )
+
+            med_q = model.medical_queue_monitoring_df.copy()
+            med_q["Run Number"] = run_idx
+            self.agg_medical_queue_monitoring_df = pd.concat(
+                [self.agg_medical_queue_monitoring_df, med_q], ignore_index=True
             )
 
             cons_q = model.consultant_queue_monitoring_df.copy()
@@ -137,30 +157,70 @@ class Trial:
                 ignore_index=True
             )
 
+            # Calibration aggregates
+            if hasattr(model, "calibration_summary"):
+                self.agg_calibration_summary = pd.concat(
+                    [self.agg_calibration_summary, model.calibration_summary],
+                    ignore_index=True
+                )
+            if hasattr(model, "calibration_deciles"):
+                self.agg_calibration_deciles = pd.concat(
+                    [self.agg_calibration_deciles, model.calibration_deciles],
+                    ignore_index=True
+                )
+
             if progress_bar:
                 pct = int(run_idx / run_number * 100)
                 progress_bar.progress(pct, text=f"[BASELINE] Running simulation... {pct}%")
 
-        # --- Write ONE set of aggregated outputs for the whole batch ---
+
+        # Build complete summary across runs in one shot
+        self.agg_results_complete = (
+            pd.concat(buf_complete, ignore_index=True) if buf_complete else pd.DataFrame()
+        )
+
+
+        tmp = self.agg_results_complete.copy()
+        tmp["mean_value"] = pd.to_numeric(tmp["mean_value"], errors="coerce")
+        self.agg_results_complete = (
+            tmp.groupby(["measure"], dropna=False, as_index=False)["mean_value"]
+            .mean()
+            .rename(columns={"mean_value": "mean_across_runs"})
+        )
+        
+
+        # --- Write aggregated outputs for the batch ---
         self.agg_results_df.to_csv(os.path.join(scenario_dir, "baseline_results.csv"), index=False)
         self.agg_event_log.to_csv(os.path.join(scenario_dir, "baseline_event_log.csv"), index=False)
-        self.agg_results_hourly.to_csv(os.path.join(scenario_dir, "baseline_summary_hourly.csv"), index=False)
-        self.agg_results_daily.to_csv(os.path.join(scenario_dir, "baseline_summary_daily.csv"), index=False)
-        self.agg_results_complete.to_csv(os.path.join(scenario_dir, "baseline_summary_complete.csv"), index=False)
+        
+        # Save per-run concatenated results for debugging
+        self.agg_results_complete.to_csv(os.path.join(scenario_dir, "baseline_summary_complete_allruns.csv"), index=False)
+
+
+        # Save per-run concatenated results related to queues
+
         self.agg_ed_assessment_queue_monitoring_df.to_csv(
             os.path.join(scenario_dir, "baseline_queue_ed_assessment.csv"), index=False
-        )
+        )   
+        self.agg_medical_queue_monitoring_df.to_csv(
+            os.path.join(scenario_dir, "baseline_queue_medical.csv"), index=False
+        )     
         self.agg_consultant_queue_monitoring_df.to_csv(
             os.path.join(scenario_dir, "baseline_queue_consultant.csv"), index=False
         )
         self.agg_amu_queue_df.to_csv(
             os.path.join(scenario_dir, "baseline_queue_amu.csv"), index=False
         )
-
         self.agg_ed_doctor_block_monitoring_df.to_csv(
             os.path.join(scenario_dir, "baseline_ed_doctor_blocks.csv"), index=False
         )
 
+        self.agg_calibration_summary.to_csv(
+            os.path.join(scenario_dir, "baseline_calibration_summary.csv"), index=False
+        )
+        self.agg_calibration_deciles.to_csv(
+            os.path.join(scenario_dir, "baseline_calibration_deciles.csv"), index=False
+        )
         pd.DataFrame(self.seed_manifest).to_csv(
             os.path.join(scenario_dir, "baseline_seed_manifest.csv"), index=False
         )

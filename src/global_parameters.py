@@ -10,16 +10,13 @@ class GlobalParameters:
                 proportion_direct_primary_care,
                 ambulance_acuity_probabilities,
                 walk_in_acuity_probabilities,
-                other_specialty_referral_rate,
                 paediatric_referral_rate,
-                bloods_request_probability,
                 ambulance_triage_nurse_capacity,
                 walk_in_triage_nurse_capacity,
                 shift_patterns_weekday,
                 shift_patterns_weekend,
                 medical_doctor_capacity,
                 consultant_capacity,
-                hca_capacity,
                 sdec_open_hour,
                 sdec_close_hour,
                 max_sdec_capacity, 
@@ -33,8 +30,6 @@ class GlobalParameters:
                 sigma_ed_service_time,
                 mu_ed_decision_time,
                 sigma_ed_decision_time,
-                max_ed_service_time,
-                min_ed_service_time,
                 mu_medical_service_time,
                 sigma_medical_service_time,
                 max_medical_service_time,
@@ -43,10 +38,6 @@ class GlobalParameters:
                 consultant_discharge_prob,
                 mu_consultant_assessment_time,
                 sigma_consultant_assessment_time,
-                mu_blood_draw_time,
-                sigma_blood_draw_time,
-                mu_blood_lab_time,
-                sigma_blood_lab_time,
                 direct_triage_threshold,
                 burn_in_time,
                 cool_down_time,
@@ -68,9 +59,8 @@ class GlobalParameters:
             
             # Define the file path for patient attributes
             self.news2_file = os.path.join(self.project_dir, "data/patient_attributes/news2_distribution.csv")
-            self.admission_probability_file = os.path.join(self.project_dir, "data/patient_attributes/calibrated_predicted_probabilities.csv")
+            self.admission_probability_file = os.path.join(self.project_dir, "data/patient_attributes/calibrated_predicted_probabilities_slope.csv")
           
-
             # Mode of arrival
             self.ambulance_proportion = ambulance_proportion
             self.walk_in_proportion = walk_in_proportion
@@ -83,21 +73,18 @@ class GlobalParameters:
             self.proportion_direct_primary_care = proportion_direct_primary_care
 
             # Outcome thresholds
-            self.other_specialty_referral_rate = other_specialty_referral_rate
             self.paediatric_referral_rate = paediatric_referral_rate
         
             # Medicine discharge probabilities
             self.initial_medicine_discharge_prob = initial_medicine_discharge_prob
             self.consultant_discharge_prob = consultant_discharge_prob
-            self.bloods_request_probability = bloods_request_probability
+           
 
         
             # Define the resources
             self.ambulance_triage_nurse_capacity = ambulance_triage_nurse_capacity
             self.walk_in_triage_nurse_capacity = walk_in_triage_nurse_capacity
-            self.hca_capacity = hca_capacity 
-            
-            
+         
             # Shift pattenrs  
             self.shift_patterns_weekday = shift_patterns_weekday  # list[dict]
             self.shift_patterns_weekend = shift_patterns_weekend  # list[dict]
@@ -122,20 +109,11 @@ class GlobalParameters:
             self.mu_triage_assessment_time   = mu_triage_assessment_time
             self.sigma_triage_assessment_time = sigma_triage_assessment_time            
 
-            self.mu_blood_draw_time = mu_blood_draw_time
-            self.sigma_blood_draw_time = sigma_blood_draw_time
-
-            self.mu_blood_lab_time = mu_blood_lab_time
-            self.sigma_blood_lab_time = sigma_blood_lab_time
-
             self.mu_ed_service_time = mu_ed_service_time
             self.sigma_ed_service_time = sigma_ed_service_time
 
             self.mu_ed_decision_time = mu_ed_decision_time
             self.sigma_ed_decision_time = sigma_ed_decision_time
-
-            self.min_ed_service_time = min_ed_service_time    
-            self.max_ed_service_time = max_ed_service_time
         
             self.mu_medical_service_time =  mu_medical_service_time
             self.sigma_medical_service_time =  sigma_medical_service_time

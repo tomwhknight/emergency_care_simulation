@@ -2,6 +2,8 @@
 import numpy as np
 from src.model import Model
 from src.helper import extract_hour
+from src.helper import exp_rv, wchoice, bern 
+from src.helper import dt_threshold_from_top_percent
 
 class AltModel(Model):
     """
@@ -16,51 +18,71 @@ class AltModel(Model):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        # Pull the threshold placed on global_params by the trial/run
-        th = getattr(self.global_params, "direct_triage_threshold", np.nan)
-        try:
-            th = float(th)
-        except Exception:
-            th = np.nan
+        self._scenario_name = "alt"
+        self._policy_label  = "clinical_only"
+        self._dt_threshold  = np.nan
 
-        self._dt_threshold  = th
-        self._scenario_name = f"alt_dt_{th:.2f}" if np.isfinite(th) else "alt_dt_unset"
+        # Treat direct_triage_threshold as a PERCENT (e.g., 10.0 = top 10%)
+        pct = float(getattr(self.global_params, "direct_triage_threshold", 0) or 0)
+        pct = max(0.0, min(100.0, pct))
 
-    # ---------- Fallback after SDEC rejects: choose ED vs Direct-to-Medicine ----------
+        if pct > 0.0:
+            th_val, label = dt_threshold_from_top_percent(self._p_raw, self._p_cal, pct)
+            self._dt_threshold = float(th_val) 
+            self._policy_label = label
+        else:
+            self._dt_threshold = np.nan
+            self._policy_label = "clinical_only"     
 
     def ed_or_direct(self, patient):
         """
-        Fallback after SDEC rejects/closed/no capacity:
-        - Clinical screen: NEWS2 ≤ 4 and acuity != 1
-        - If direct_triage_threshold is None: everyone passing clinical screen goes direct
-        - Else: gate on RAW score (patient.referral_score) >= threshold
+        After SDEC rejects/closed/no capacity:
+        1) Decide Medicine intent with p_cal (Bernoulli) – once.
+        2) If not Medicine → ED.
+        3) If Medicine → clinical screen; if a cutoff is set, also require p_raw ≥ cutoff.
         """
-        th = getattr(self.global_params, "direct_triage_threshold", None)
-        try:
-            th = float(th) if th is not None else None
-        except Exception:
-            th = None
 
+        # 1) Medicine intent (rate control) — do once
+        if getattr(patient, "medicine_intent", None) is None:
+            patient.medicine_intent = bern(patient.referral_prob_cal, self.rng_probs)
+            self.record_result(patient.id, "Referral Medicine", bool(patient.medicine_intent))
+
+        if not patient.medicine_intent:
+            # Not Medicine → always ED path
+            self.record_result(patient.id, "DT Eligible", False)
+            self.record_result(patient.id, "Pathway Start", "ED")
+            self.record_result(patient.id, "DT Block Reason", "Not Medicine Intent")
+            return self.env.process(self.ed_assessment(patient))
+
+        # 2) Route policy for Medicine-intent patients
+        th = self._dt_threshold  # ← already materialised in __init__ (raw cutoff or NaN)
         news_ok   = (patient.news2 <= 4)
         acuity_ok = (patient.acuity != 1)
 
-        if th is None:
-            eligible = news_ok and acuity_ok
+        if np.isfinite(th):
+            eligible = news_ok and acuity_ok and (patient.referral_score_raw >= th)
+            block_reason = None if eligible else (
+                "Clinical screen" if not (news_ok and acuity_ok) else "Score<threshold"
+            )
         else:
-            score = patient.referral_score     
-            eligible = news_ok and acuity_ok and (score >= th)
+            # clinical-only mode (no raw cutoff)
+            eligible = news_ok and acuity_ok
+            block_reason = None if eligible else "Clinical screen"
 
-        # Record for analysis
         self.record_result(patient.id, "DT Eligible", bool(eligible))
-        self.record_result(patient.id, "Pathway Start", "Direct-Medicine" if eligible else "ED")
 
         if eligible:
+            self.record_result(patient.id, "Pathway Start", "Direct-Medicine")
+            self.record_result(patient.id, "ED Pathway Subtype", "Direct—Medicine")
+            self.record_result(patient.id, "DT Block Reason", np.nan)
             return self.env.process(self.direct_triage_to_medicine(patient))
         else:
+            self.record_result(patient.id, "Pathway Start", "ED")
+            self.record_result(patient.id, "ED Pathway Subtype", "ED—Medicine")
+            self.record_result(patient.id, "DT Block Reason", block_reason)
             return self.env.process(self.ed_assessment(patient))
 
-
-    # ---------- Perform the direct referral (reuses downstream logic) ----------
+        
     def direct_triage_to_medicine(self, patient):
         """Bypass ED assessment—refer straight to Medicine (SDEC already rejected)."""
         # Keep disposition label identical so existing reports work
@@ -69,15 +91,16 @@ class AltModel(Model):
 
         patient.referral_to_medicine_time = self.env.now
         self.record_result(
-            patient.id, "Arrival to Referral",
-            patient.referral_to_medicine_time - patient.arrival_time
+            patient.id,
+            "Arrival to Referral",
+            patient.referral_to_medicine_time - patient.arrival_time,
         )
         self.record_event(patient, "direct_triage_referral")
 
         # Standard post-referral pipeline (unchanged)
         self.env.process(self.refer_to_amu_bed(patient))
         yield self.env.process(self.initial_medical_assessment(patient))
-
+    
     # ---------- Only override: SDEC accepted path unchanged; fallback becomes ed_or_direct ----------
     def refer_to_sdec(self, patient, fallback_process):
         """SDEC unchanged for Accepted. If Rejected/Closed/No capacity -> ed_or_direct()."""
