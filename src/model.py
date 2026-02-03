@@ -1,6 +1,8 @@
 import simpy
 import pandas as pd
 import numpy as np
+
+from scipy.special import erfinv
 from src.patient import Patient
 from src.helper import calculate_hour_of_day, extract_day_of_week, extract_hour
 from src.helper import exp_rv, wchoice, bern 
@@ -21,6 +23,7 @@ class Model:
         self.patient_counter = 0
         self.amu_waiting_counter = 0
         self.total_beds_generated = 0 
+        self._shift_pattern_cache = {}
 
         # Set individual seeds per process
         self.rng_arrivals  = np.random.Generator(np.random.PCG64(self.global_params.seed_arrivals))
@@ -112,6 +115,10 @@ class Model:
             "Arrival to AMU Admission",
             "Referral to AMU Admission",
 
+            "Arrival to Other Admission",
+            "Referral to Other Admission",
+            "Surgical Bed Delay",
+
             # --- Medical Assessment ---
             "Queue Length Medical Doctor",
             "Arrival to Medical Assessment",
@@ -149,6 +156,7 @@ class Model:
         self._cons_q_buf = []
         self._amu_q_buf = []
         self._ed_block_buf = []
+        self._resource_mon_buf = []
 
         # Placeholders so attributes exist before run()
         self.event_log_df = pd.DataFrame(columns=["run_number","patient_id","event","timestamp"])
@@ -159,6 +167,11 @@ class Model:
         self.ed_doctor_block_monitoring_df = pd.DataFrame(columns=[
             "Simulation Time","Hour of Day","Physical Capacity","Rota Blockers","Break Blockers",
             "Total Blockers","Effective Capacity","Active Patient Users","Patient Queue Length","Desired From Rota"
+        ])
+        self.resource_monitoring_df = pd.DataFrame(columns=[
+            "Run Number", "Simulation Time", "Hour of Day",
+            "Resource", "Physical Capacity", "Active Blockers",
+            "Effective Capacity", "In Use (Patients)", "Queue (Patients)"
         ])
 
 
@@ -279,8 +292,23 @@ class Model:
                 idx = int(self.rng_probs.integers(self._p_n))
                 referral_prob_cal  = float(self._p_cal[idx])   # calibrated: referral to ANY specialty
                 referral_score_raw = float(self._p_raw[idx])   # raw score (optional)
- 
+
+            # --- Adjust referral probability on the ODDS scale (for sensitivity analysis) ---
+            # IMPORTANT: SDEC rules *must* use the ORIGINAL calibrated probability (referral_prob_cal).
+            # The adjusted probability is used only when drawing `referral_intent`.
             
+            adj_referral_prob_cal = referral_prob_cal
+            if (
+                adult
+                and not np.isnan(referral_prob_cal)
+                and getattr(self.global_params, "referral_sensitivity_on", False)
+            ):
+                p = np.clip(referral_prob_cal, 1e-9, 1 - 1e-9)   # avoid 0/1 edge cases
+                odds = p / (1.0 - p)
+                odds *= getattr(self.global_params, "referral_odds_multiplier", 1.0)
+                adj_referral_prob_cal = odds / (1.0 + odds)
+
+
             # SDEC appropriate
 
             if adult:
@@ -323,12 +351,26 @@ class Model:
 
             # --- Draw "intent to refer to ANY specialty" (adult-only) ---
             if adult and not np.isnan(referral_prob_cal):
-                # IMPORTANT: this now means "ANY referral", not "medicine"
-                patient.referral_intent = bern(referral_prob_cal, self.rng_probs)
-                # (Optional) record under a clearer column name if you add one:
-                # self.record_result(patient.id, "Referral Any Specialty Intent", bool(patient.medicine_intent))
+                # Use adjusted probability if sensitivity is ON; otherwise this equals the calibrated value.
+                patient.referral_intent = bern(adj_referral_prob_cal, self.rng_probs)
+
+                # Do the Medicine vs Other split ONCE at arrival
+                if patient.referral_intent:
+                    patient.intend_medicine = (
+                        self.rng_probs.random() < self.global_params.prob_referral_to_medicine_adult
+                    )
+                    patient.intend_other_specialty = not patient.intend_medicine
+                else:
+                    patient.intend_medicine = False
+                    patient.intend_other_specialty = False
             else:
                 patient.referral_intent = False
+                patient.intend_medicine = False
+                patient.intend_other_specialty = False
+
+
+
+
     
             # Initialise a dictionary of patient results 
 
@@ -384,6 +426,10 @@ class Model:
             "Arrival to AMU Admission": np.nan,
             "Referral to AMU Admission": np.nan,
 
+            "Arrival to Other Admission": np.nan,
+            "Referral to Other Admission": np.nan,
+            "Surgical Bed Delay": np.nan,
+
             # --- Medical Assessment Process ---
             "Queue Length Medical Doctor": np.nan,
             "Arrival to Medical Assessment": np.nan,
@@ -438,18 +484,18 @@ class Model:
             ]
             
             booked_appointment_prob = float(row.iloc[0]) if not row.empty else 0.0
-
-            # Use your model RNG if you have one (preferred for reproducibility)
             is_booked = bern(booked_appointment_prob, self.rng_probs)
             self.record_result(patient.id, "Booked Appointment", bool(is_booked))
-            self.record_result(patient.id, "Discharge Decision Point", "booked_appointment")
-
-
 
             if is_booked:
-                log(lambda: f"[{self.env.now:.2f}] Patient {patient.id} has a booked appointment; no ED triage.")
-    
-            else:    
+                # Treat as immediate ED exit
+                self.record_result(patient.id, "Discharge Decision Point", "booked_appointment")
+                patient.discharged = True
+                patient.discharge_time = self.env.now
+                self.record_result(patient.id, "Time in System", np.nan)
+                self.record_event(patient, "booked_appointment_exit")
+                log(lambda: f"[{self.env.now:.2f}] Patient {patient.id} has a booked appointment; exits ED.")
+            else:
                 if mode_of_arrival == "Ambulance":
                     log(lambda: f"Ambulance Patient {patient.id} arrives at {arrival_time}")
                     self.env.process(self.ambulance_triage(patient))
@@ -491,6 +537,34 @@ class Model:
             arrival_interval = exp_rv(mean_arrival_rate, self.rng_arrivals)  # minutes
             yield self.env.timeout(arrival_interval)
 
+    def amu_queue_length(self):
+        """Return current number of patients waiting for an AMU bed."""
+        return getattr(self, "amu_waiting_counter", 0)
+
+    def amu_dynamic_scale(self):
+        """
+        Smooth scale in [1.0, amu_surge_max_scale] based on AMU waiting count.
+        - q <= soft → 1.0
+        - q >= hard → max_scale
+        - in between → linear interpolation
+        """
+        q         = self.amu_queue_length()
+        q_soft    = self.global_params.amu_queue_soft
+        q_hard    = self.global_params.amu_queue_hard
+        max_scale = self.global_params.amu_surge_max_scale
+
+        # No surge if not configured
+        if max_scale <= 1.0 or q_hard <= q_soft:
+            return 1.0
+
+        if q <= q_soft:
+            return 1.0
+        if q >= q_hard:
+            return max_scale
+
+        frac = (q - q_soft) / (q_hard - q_soft)  # between 0–1
+        return 1.0 + frac * (max_scale - 1.0)
+
     # Method to generate AMU beds
     def generate_amu_beds(self):
 
@@ -499,22 +573,29 @@ class Model:
 
             # Extract the current hour
             current_hour = extract_hour(self.env.now)
-            current_day = extract_day_of_week(self.env.now)
+            current_day  = extract_day_of_week(self.env.now)
 
-            # Get the mean for day and hour
+            # Get the mean for day and hour (hourly mean!)
             mean_beds = self.amu_bed_rate_data.loc[
-            (self.amu_bed_rate_data['hour'] == current_hour) & (self.amu_bed_rate_data ['day'] == current_day), 'mean_beds_available'
+                (self.amu_bed_rate_data['hour'] == current_hour) &
+                (self.amu_bed_rate_data['day'] == current_day),
+                'mean_beds_available'
             ].values[0]
 
-             # Sample number of beds to release this hour
+            # Smooth dynamic surge based on AMU queue length
+            dyn_scale = self.amu_dynamic_scale()     # between 1.0 and 1.1
+            mean_beds = mean_beds * dyn_scale        # apply smooth surge
+
+            # Sample number of beds to release this hour (UNCHANGED logic)
             amu_beds_this_hour = self.rng_resources.poisson(mean_beds)
-            
-            for beds in range(amu_beds_this_hour):
-                delay = self.rng_resources.uniform(0, 60)
+
+            for _ in range(amu_beds_this_hour):
+                delay = self.rng_resources.uniform(0, 60)  # STILL 60-minute spread
                 self.env.process(self.release_amu_bed_after_delay(delay))
 
-            # Wait until the start of the next hour
+            # Wait until the start of the next hour (STILL 60)
             yield self.env.timeout(60)
+
     
     # Method to stagger bed release
     def release_amu_bed_after_delay(self, delay):
@@ -715,6 +796,44 @@ class Model:
 
             yield self.env.timeout(interval)
 
+    # Method to monitor resource utilisation 
+    def monitor_resource_state(self, resource, resource_name, interval=5):
+        """
+        Generic monitor for (Priority)Resource utilisation + queue length.
+        Logs patient usage only (excludes blocker requests if tagged).
+        """
+        while True:
+            now = self.env.now
+
+            # Optional: match your results window (burn-in + cool-down)
+            obs_start = self.burn_in_time
+            obs_end   = self.global_params.simulation_time - self.global_params.cool_down_time
+
+            if (now > obs_start) and (now < obs_end):
+                hod = int((now // 60) % 24)
+
+                active_blockers = sum(1 for u in resource.users if getattr(u, "is_block", False))
+                in_use_patients = sum(1 for u in resource.users if not getattr(u, "is_block", False))
+                queue_patients  = sum(1 for q in resource.queue if not getattr(q, "is_block", False))
+
+                phys_cap = int(resource.capacity)
+                eff_cap  = max(0, phys_cap - active_blockers)
+
+                self._resource_mon_buf.append({
+                    "Run Number": self.run_number,
+                    "Simulation Time": now,
+                    "Hour of Day": hod,
+                    "Resource": resource_name,
+                    "Physical Capacity": phys_cap,
+                    "Active Blockers": active_blockers,
+                    "Effective Capacity": eff_cap,
+                    "In Use (Patients)": in_use_patients,
+                    "Queue (Patients)": queue_patients
+                })
+
+            yield self.env.timeout(interval)
+
+
     # --- Dynamic resource modelling ---
 
     # Method to block walk-in triage nurse 
@@ -735,7 +854,45 @@ class Model:
             # Wait until the next hour to check again
             yield self.env.timeout(60)
 
-    def get_available_doctors(self, current_time_minutes, start_block=15, end_cutoff=45):
+    def _jitter_shift_patterns(self, patterns):
+        """
+        Return a new list of shift dicts with small jitter on the 'count' field.
+        Jitter is applied once per simulation day, per shift (not hour-by-hour).
+        """
+        jittered = []
+        for shift in patterns:
+            base_count = shift["count"]
+
+            # Example: 80% same, 10% -1, 10% +1
+            jitter = self.rng_resources.choice([0, 1, 2], p=[0.8, 0.1, 0.1])
+            new_count = max(0, base_count + jitter)
+
+            jittered.append({**shift, "count": new_count})
+        return jittered
+    
+       
+
+    def _get_jittered_patterns_for_time(self, current_time_minutes):
+        """
+        Return the jittered shift patterns for the simulation day containing
+        current_time_minutes (separate patterns for weekday/weekend).
+        """
+        day_index = int(current_time_minutes // 1440)  # 0,1,2,... across the sim
+        is_weekend = extract_day_of_week(current_time_minutes) in ("Sat", "Sun")
+        key = (day_index, is_weekend)
+
+        if key not in self._shift_pattern_cache:
+            base = (
+                self.global_params.shift_patterns_weekend
+                if is_weekend
+                else self.global_params.shift_patterns_weekday
+            )
+            self._shift_pattern_cache[key] = self._jitter_shift_patterns(base)
+
+        return self._shift_pattern_cache[key]
+
+
+    def get_available_doctors(self, current_time_minutes, start_block=5, end_cutoff=45):
         """
         Calculate how many doctors are available to START a new patient based on
         current simulation time and shift patterns, with handover rules:
@@ -755,10 +912,8 @@ class Model:
         now = int(current_time_minutes % (24 * 60))
         available_count = 0
 
-        patterns = (self.global_params.shift_patterns_weekend
-            if extract_day_of_week(current_time_minutes) in ("Sat", "Sun")
-            else self.global_params.shift_patterns_weekday)
-
+        patterns = self._get_jittered_patterns_for_time(current_time_minutes)
+  
         for shift in patterns:
             start = to_minutes(shift["start"])
             end   = to_minutes(shift["end"])
@@ -781,7 +936,8 @@ class Model:
             if mins_since >= start_block and mins_to_end > end_cutoff:
                 available_count += count
 
-        return available_count
+        return available_count  
+    
 
     def _count_blockers(self, resource, block_type=None):
         """
@@ -850,7 +1006,7 @@ class Model:
             now = self.env.now
             desired = self.get_available_doctors(now)
             desired = max(0, min(self.global_params.max_ed_doctor_capacity, desired))
-            phys_cap = self.global_params.max_ed_doctor_capacity
+            phys_cap = self.global_params.max_ed_doctor_capacity 
             target_rota_blockers = max(0, phys_cap - desired)
 
             # BEFORE
@@ -1022,6 +1178,8 @@ class Model:
 
         """Simulate blocking a medical doctor for a specific duration."""
         with self.medical_doctor.request(priority=-1) as req:
+            req.is_block = True
+            req.block_type = "rota"
             yield req  # Acquire the resource to simulate it being blocked
             yield self.env.timeout(block_duration)  # Simulate the blocking period
     
@@ -1033,9 +1191,11 @@ class Model:
             current_hour = extract_hour(self.env.now)
 
             # Check if the current time is within the off-duty period (21:00–07:00)
-            if current_hour >= 20 or current_hour < 7:
+            if current_hour >= 21 or current_hour < 7:
 
                 with self.consultant.request(priority=-1) as req:
+                    req.is_block = True
+                    req.block_type = "rota"
                     yield req  # Block the resource
                     yield self.env.timeout(60)  # Hold the block for 1 hour
             
@@ -1181,15 +1341,33 @@ class Model:
             self.record_result(patient.id, "Arrival to ED Assessment", wait_time)
             self.record_event(patient, "ed_assessment_start")
 
-            # Sample service and decision times (resource held during service)
-            service_time_sample = self.rng_service.lognormal(
-                mean=self.global_params.mu_ed_service_time,
-                sigma=self.global_params.sigma_ed_service_time
+          
+            # --- Joint sampling of service and decision times ---
+
+            eps = 1e-12  # prevent edge case of drawing zero
+            gamma = self.global_params.joint_gamma
+
+            if gamma is None:
+                # --- NO COUPLING: independent uniforms for service and decision ---
+                speed_factor_service  = max(self.rng_service.random(), eps)
+                speed_factor_decision = max(self.rng_service.random(), eps)
+            else:
+                # --- COUPLED: shared latent percentile, optionally stretched by gamma ---
+                speed_factor_service  = max(self.rng_service.random(), eps)
+                speed_factor_decision = speed_factor_service**gamma
+
+            # Convert the 0–1 percentiles into z-scores (standard normal)
+            z_service  = np.sqrt(2) * erfinv(2*speed_factor_service  - 1)
+            z_decision = np.sqrt(2) * erfinv(2*speed_factor_decision - 1)
+
+            # Lognormal service and decision times
+            service_time_sample  = np.exp(
+                self.global_params.mu_ed_service_time
+                + self.global_params.sigma_ed_service_time * z_service
             )
-            
-            decision_time_sample = self.rng_service.lognormal(
-                mean=self.global_params.mu_ed_decision_time,
-                sigma=self.global_params.sigma_ed_decision_time
+            decision_time_sample = np.exp(
+                self.global_params.mu_ed_decision_time
+                + self.global_params.sigma_ed_decision_time * z_decision
             )
 
             # Doctor works for the service time
@@ -1200,8 +1378,23 @@ class Model:
             service_time_actual = ed_assessment_end_time - ed_assessment_start_time
             self.record_result(patient.id, "ED Assessment Service Time", service_time_actual)
 
-        # Compute any *extra* decision time beyond service
+        # --- Compute excess decision delay ---
         excess_decision_after_assessment = max(0.0, decision_time_sample - service_time_actual)
+
+        # Mirror the 4 hour breach push
+        residual = max(0.0, decision_time_sample - service_time_actual)
+        projected_total = (self.env.now - patient.arrival_time) + residual
+        
+        window_start = self.global_params.adjustment_start
+        window_end   = self.global_params.adjustment_end
+        strength = self.global_params.decision_hazard_strength_240 
+
+        if (residual > 0.0) and (window_start <= projected_total < window_end):
+            w = 1.0 - (projected_total - window_start) / (window_end - window_start)
+            scale = 1.0 - strength * w
+            residual *= scale
+            excess_decision_after_assessment = residual
+            decision_time_sample = service_time_actual + residual
 
         # Record the sampled decision time and the excess
         self.record_result(patient.id, "ED Decision Time", decision_time_sample)
@@ -1220,22 +1413,20 @@ class Model:
                 patient.ed_disposition = "Discharge - Paeds"
 
         else:
-            # Here, referral_intent == True means "referred to ANY specialty" for adults
-
             if patient.referral_intent:
-                # Per-patient random split around 50% for Medicine vs Other
-                # Normal(0.5, 0.05); clamp to [0,1] so it's a valid probability
-                
-                medicine_share = float(np.clip(self.rng_probs.normal(loc=0.55, scale=0.05), 0.0, 1.0))
-                
-                if self.rng_probs.random() < medicine_share:
+                # Use the split computed at arrival; if absent, compute once (back-compat)
+                if getattr(patient, "intend_medicine", None) is None:
+                    patient.intend_medicine = (
+                        self.rng_probs.random() < self.global_params.prob_referral_to_medicine_adult
+                    )
+
+                if patient.intend_medicine:
                     patient.ed_disposition = "Refer - Medicine"
                     self.record_result(patient.id, "Referral Medicine", True)
                 else:
                     patient.ed_disposition = "Refer - Other Speciality"
                     self.record_result(patient.id, "Referral Medicine", False)
             else:
-                # No referral to ANY specialty → discharge from ED
                 patient.ed_disposition = "Discharge"
                 self.record_result(patient.id, "Referral Medicine", False)
 
@@ -1248,11 +1439,31 @@ class Model:
             return
 
         elif outcome == "Refer - Other Speciality":
-            finalise_disposition(patient, "ed_referred_other_specialty_pseudo_exit", "referral_to_speciality")
+            patient.referral_to_surgical_time = self.env.now
+            surgical_bed_delay = float(self.rng_service.lognormal(
+                mean=self.global_params.mu_surgical_bed_delay,
+                sigma=self.global_params.sigma_surgical_bed_delay
+            ))
+            self.record_result(patient.id, "Surgical Bed Delay", surgical_bed_delay)
+            yield self.env.timeout(surgical_bed_delay)          
+            
+            # ED departure now
+            patient.surgical_departure_time = self.env.now
+            self.record_result(patient.id, "Arrival to Other Admission",
+                            patient.surgical_departure_time - patient.arrival_time)
+            self.record_result(patient.id, "Referral to Other Admission",
+                            patient.surgical_departure_time - patient.referral_to_surgical_time)
+            
+            
+            finalise_disposition(patient, "ed_referred_other_specialty", "referral_to_speciality")
             return
 
         elif outcome == "Refer - Paeds":
-            finalise_disposition(patient, "ed_referred_paeds_pseudo_exit", "referral_to_paeds")
+            finalise_disposition(patient, "ed_referred_paeds", "referral_to_paeds")
+            return
+        
+        elif outcome == "Discharge - Paeds":
+            finalise_disposition(patient, "ed_discharge", "discharge_paeds")
             return
 
         elif outcome == "Refer - Medicine":
@@ -1260,12 +1471,15 @@ class Model:
             total_time_referral = patient.referral_to_medicine_time - patient.arrival_time
             self.record_result(patient.id, "Arrival to Referral", total_time_referral)
             self.record_event(patient, "referral_to_medicine")
+            
+            if getattr(patient, "discharge_event", None) is None:
+                patient.discharge_event = self.env.event()
+            
             yield self.env.process(self.handle_ed_referral(patient))
 
     def handle_ed_referral(self, patient):
         """Handles referral after ED assessment when SDEC is rejected.
         Ensures patient is referred to AMU queue while also starting medical assessment."""
-
         self.env.process(self.refer_to_amu_bed(patient))          
         yield self.env.process(self.initial_medical_assessment(patient))  # Wait for this to finish
 
@@ -1354,15 +1568,9 @@ class Model:
             log(lambda: f"{end_medical_queue_time:.2f}: Medical doctor starts assessing Patient {patient.id}.")
 
             # Sample the medical assessment time from log normal distribution
-            raw_time = self.rng_service.lognormal(
+            med_assessment_time  = self.rng_service.lognormal(
             mean=self.global_params.mu_medical_service_time,
             sigma=self.global_params.sigma_medical_service_time
-            )
-
-            # Truncate to min and max values
-            med_assessment_time = min(
-                max(raw_time,self.global_params.min_medical_service_time),
-            self.global_params.max_medical_service_time  
             )
 
             yield self.env.timeout(med_assessment_time)
@@ -1378,10 +1586,9 @@ class Model:
             patient.total_time_medical = total_time_medical
             self.record_result(patient.id, "Arrival to End of Medical Assessment",  total_time_medical)
             self.record_event(patient, "initial_medical_assessment_end")
-            
 
             # Discharge decision with a low probability (e.g., 5%)
-            if bern(self.global_params.initial_medicine_discharge_prob, self.rng_probs):
+            if (patient.amu_admission_time is None) and bern(self.global_params.initial_medicine_discharge_prob, self.rng_probs):
                 patient.discharged = True
                 patient.discharge_time = self.env.now
                 time_in_system = self.env.now - patient.arrival_time
@@ -1440,7 +1647,8 @@ class Model:
             self.record_event(patient, "consultant_assessment_end")
             
             # Discharge after consolutant assessment logic
-            if bern(self.global_params.consultant_discharge_prob, self.rng_probs):
+  
+            if (patient.amu_admission_time is None) and bern(self.global_params.consultant_discharge_prob, self.rng_probs):
                 patient.discharged = True
                 patient.discharge_time = self.env.now
                 time_in_system = self.env.now - patient.arrival_time
@@ -1450,7 +1658,7 @@ class Model:
                 if getattr(patient, "discharge_event", None) and not patient.discharge_event.triggered:
                     patient.discharge_event.succeed()
                 return
-      
+
     # --- Run Method ---
 
     def run(self):
@@ -1473,6 +1681,12 @@ class Model:
 
         # Start monitoring the consultant queue
         self.env.process(self.monitor_ed_assessment_queue_length())
+
+        # Resource utilisation/queue monitors (interval in minutes)
+        self.env.process(self.monitor_resource_state(self.ed_doctor, "ED Doctor Pool", interval=5))
+        self.env.process(self.monitor_resource_state(self.medical_doctor, "Medical Doctor", interval=5))
+        self.env.process(self.monitor_resource_state(self.consultant, "Consultant", interval=5))
+
 
         # Start monitoring ED doctor blocking
         self.env.process(self.monitor_ed_doctor_blocks(interval=15))
@@ -1514,6 +1728,8 @@ class Model:
             self.ed_doctor_block_monitoring_df = pd.DataFrame(self._ed_block_buf)
         if getattr(self, "_amu_q_buf", None):
             self.amu_queue_df = pd.DataFrame(self._amu_q_buf)
+        if getattr(self, "_resource_mon_buf", None):
+            self.resource_monitoring_df = pd.DataFrame(self._resource_mon_buf)
 
         # Add 4-hour breach column to individual results
         self.run_results_df['Breach 4hr'] = self.run_results_df['Time in System'].gt(240)

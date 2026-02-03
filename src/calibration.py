@@ -5,9 +5,7 @@ calibration.py — Full-grid calibration & diagnostics for DES vs Observed.
 Outputs in src/results/:
   - calibration_grid_all.csv
   - time_in_system_summary_all.csv
-  - hourly_breach_profiles_all.csv
-  - arrivals_per_hour_profiles_all.csv
-  - admitted_mix_by_hour_profiles_all.csv
+
 """
 
 import os
@@ -18,127 +16,80 @@ from scipy.stats import ks_2samp
 
 # ------------------------- Import your runner -------------------------
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from run_calibration import run_model as _raw_run_model, global_params  # noqa: E402
+from run_calibration import run_model as _raw_run_model, global_params  
 
 # ------------------------------ Config -------------------------------
-OBS_PATH = "data/calibration/observed_system_time.csv"
+OBS_TIS_PATH   = "data/calibration/observed_system_time.csv"
+OBS_QUEUE_PATH = "data/calibration/observed_ed_assessment_queue.csv" 
+SIM_QUEUE_COL = "Queue Length ED doctor"   # exact sim patient-level column name
+SIM_HOUR_COL  = "Hour of Arrival"   
+
 RESULTS_DIR = "src/results"
 
 GRID_PATH = os.path.join(RESULTS_DIR, "calibration_grid_all.csv")
 TIS_SUMMARY_PATH = os.path.join(RESULTS_DIR, "time_in_system_summary_all.csv")
-BREACH_PROFILES_PATH = os.path.join(RESULTS_DIR, "hourly_breach_profiles_all.csv")
-ARRIVALS_PROFILES_PATH = os.path.join(RESULTS_DIR, "arrivals_per_hour_profiles_all.csv")
-ADMITTED_MIX_PROFILES_PATH = os.path.join(RESULTS_DIR, "admitted_mix_by_hour_profiles_all.csv")
+QUEUE_SUMMARY_PATH = os.path.join(RESULTS_DIR, "queue_length_summary_all.csv")
 
 # Parameter grid
-mus    = np.arange(4.06, 5.0, 0.02)
-sigmas = np.arange(0.60, 0.65, 0.01)
+mus    = np.array([3.85, 3.90, 3.95, 4.00, 4.05])
+sigmas = np.array([0.45, 0.50, 0.55, 0.60, 0.65])
 
 TOTAL_RUNS = 10
-THRESHOLD_MIN = 240
 np.random.seed(42)
 
 # ------------------------ Normalisation helpers ----------------------
-POSSIBLE_TIS = [
-    "time_in_system", "Time in System", "Time_in_System", "Time in ED",
-    "time_in_ed", "Total Time in System", "total_time_in_system"
-]
-POSSIBLE_HOUR = [
-    "hour_of_day", "Hour of Day", "clock_hour_of_arrival",
-    "Clock Hour of Arrival", "clock_hour", "arrival_hour",
-    "arrival_time", "Arrival Time", "sim_time_arrival", "simulation_arrival_time",
-    "Clock Hour"
-]
-POSSIBLE_ADMIT = [
-    "admitted", "Admitted", "ed_admitted", "ED Admitted",
-    "ED Disposition", "ed_disposition", "Disposition", "ed_disposition_outcome"
-]
 
-def _first_existing(df, candidates):
-    for c in candidates:
-        if c in df.columns:
-            return c
-    return None
+def _normalise_sim_output(sim_patients: pd.DataFrame) -> pd.DataFrame:
+    if not isinstance(sim_patients, pd.DataFrame):
+        raise TypeError("Expected sim_patients to be a pandas DataFrame.")
+    if "time_in_system" not in sim_patients.columns:
+        raise KeyError("Missing required column: 'time_in_system'")
 
-def _coerce_hour_series(s: pd.Series) -> pd.Series:
+    # ---- exclude booked appointments using discharge_decision_point ONLY ----
+    if "discharge_decision_point" not in sim_patients.columns:
+        raise KeyError("Missing required column: 'discharge_decision_point'")
+
+    sim_patients = sim_patients.loc[
+        sim_patients["discharge_decision_point"]
+          .fillna("")
+          .astype(str)
+          .str.strip()
+          .str.lower() != "booked_appointment"
+    ].copy()
+    # -----------------------------------------------------------------------
+
+    out = sim_patients[["time_in_system"]].copy()
+    out["time_in_system"] = pd.to_numeric(out["time_in_system"], errors="coerce")
+
+    if SIM_QUEUE_COL in sim_patients.columns:
+        out["queue_seen_at_arrival"] = pd.to_numeric(sim_patients[SIM_QUEUE_COL], errors="coerce")
+    else:
+        out["queue_seen_at_arrival"] = np.nan
+
+    return out.dropna(subset=["time_in_system"])
+
+
+
+
+def run_model_outputs(g, mu, sigma, total_runs=10) -> dict:
     """
-    Accept 'HH:MM' strings, datetimes, or numeric minutes since an epoch.
-    Return 'hour_of_day' as strings 'HH:MM' (top of hour) for robust parsing downstream.
+    Expect run_calibration.run_model(...) to return:
+      {"patients": <df>, "queue_ed": <df>}
     """
-    # Try HH:MM strings
-    dt = pd.to_datetime(s, format="%H:%M", errors="coerce")
-    if dt.notna().any():
-        return dt.dt.strftime("%H:00")
-
-    # Try general datetime-like
-    dt2 = pd.to_datetime(s, errors="coerce")
-    if dt2.notna().any():
-        return dt2.dt.strftime("%H:00")
-
-    # Try numeric minutes since midnight
-    num = pd.to_numeric(s, errors="coerce")
-    if num.notna().any():
-        hr = np.floor((num.astype(float) % (24*60)) / 60.0).astype(int)
-        return pd.Series([f"{int(h):02d}:00" if pd.notna(h) else np.nan for h in hr], index=s.index)
-
-    # Give up
-    return pd.Series([np.nan]*len(s), index=s.index)
-
-def _map_admitted_from_dispo(v):
-    if pd.isna(v):
-        return np.nan
-    t = str(v).strip().lower()
-    # Non-admissions (aligns with your R logic)
-    if ("discharge" in t or "pseudo_exit" in t or "paeds" in t or
-        "other speciality" in t or "other specialty" in t or "sdec" in t):
-        return 0
-    # Admissions
-    if ("refer - medicine" in t or "medicine" in t or "amu" in t or "admit" in t):
-        return 1
-    return np.nan
-
-def _normalise_sim_output(sim_out) -> pd.DataFrame:
-    """
-    Try to coerce whatever run_model returns into a DF with:
-    ['time_in_system','hour_of_day','admitted'].
-    """
-    if isinstance(sim_out, pd.DataFrame):
-        df = sim_out.copy()
-
-        # time_in_system
-        tis_col = _first_existing(df, POSSIBLE_TIS)
-        if tis_col is None:
-            raise KeyError("Could not find a time-in-system column in sim output.")
-        df["time_in_system"] = pd.to_numeric(df[tis_col], errors="coerce")
-
-        # hour_of_day
-        hour_col = _first_existing(df, POSSIBLE_HOUR)
-        if hour_col is None:
-            raise KeyError("Could not find an arrival hour/time column in sim output.")
-        df["hour_of_day"] = _coerce_hour_series(df[hour_col])
-
-        # admitted
-        adm_col = _first_existing(df, POSSIBLE_ADMIT)
-        if adm_col is None:
-            # If truly missing, assume discharged (0) — but better to raise
-            raise KeyError("Could not find an 'admitted' or disposition column in sim output.")
-        if df[adm_col].dtype.kind in "biufc":
-            df["admitted"] = pd.to_numeric(df[adm_col], errors="coerce").fillna(0).astype(int)
-        else:
-            df["admitted"] = df[adm_col].map(_map_admitted_from_dispo).fillna(0).astype(int)
-
-        return df[["time_in_system", "hour_of_day", "admitted"]].dropna(subset=["time_in_system","hour_of_day"])
-
-    # If you get here, your run_model isn’t returning a DataFrame (e.g., a vector).
-    raise TypeError(
-        "run_model(...) must return a pandas DataFrame. "
-        "Minimal columns required: ['time_in_system','hour_of_day','admitted'].\n"
-        "Tip: return your patient-level results DF with these fields."
-    )
-
-def run_model_df(g, mu, sigma, total_runs=10) -> pd.DataFrame:
     raw = _raw_run_model(g, mu, sigma, total_runs=total_runs)
-    return _normalise_sim_output(raw)
+
+    if not isinstance(raw, dict):
+        raise TypeError("run_model(...) must return a dict")
+    
+    if "patients" not in raw or "queue_ed" not in raw:
+        raise KeyError("run_model(...) must return keys: 'patients' and 'queue_ed'")
+
+
+    return raw
+
+def run_patients_df(g, mu, sigma, total_runs=10) -> pd.DataFrame:
+    raw = run_model_outputs(g, mu, sigma, total_runs=total_runs)
+    return _normalise_sim_output(raw["patients"])
 
 # ----------------------------- Metrics -------------------------------
 def parse_hour_col(df: pd.DataFrame, col="hour_of_day") -> pd.Series:
@@ -155,68 +106,40 @@ def ensure_full_hours(tab: pd.DataFrame, on="hour") -> pd.DataFrame:
             out[c] = out[c].fillna(0)
     return out
 
-def breach_table(df: pd.DataFrame) -> pd.DataFrame:
+def queue_profile_table(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Mean queue length (seen at arrival) by hour.
+    Expects: 'hour_of_day' and 'queue_seen_at_arrival'
+    """
     tmp = df.copy()
-    tmp["hour"] = parse_hour_col(tmp, "hour_of_day")
-    tis = pd.to_numeric(tmp["time_in_system"], errors="coerce")
-    tmp["breach"] = (tis > THRESHOLD_MIN).astype("Int64")
-    g = (tmp.dropna(subset=["hour"])
-            .groupby("hour", dropna=False)["breach"]
-            .agg(k=lambda x: int((x == 1).sum()),
-                 n=lambda x: int(x.notna().sum()))
-            .reset_index())
-    g = ensure_full_hours(g, on="hour")
-    g["p"] = (g["k"] + 0.5) / (g["n"] + 1.0)
-    return g
+    tmp["hour"] = parse_hour_col(tmp, col="hour_of_day")
+    tab = (tmp.dropna(subset=["hour", "queue_seen_at_arrival"])
+             .groupby("hour", as_index=False)["queue_seen_at_arrival"]
+             .mean()
+             .rename(columns={"queue_seen_at_arrival": "mean_queue"}))
+    return ensure_full_hours(tab, on="hour")
 
-def arrivals_table(df: pd.DataFrame) -> pd.DataFrame:
+def queue_profile_table_sim(df: pd.DataFrame) -> pd.DataFrame:
     tmp = df.copy()
-    tmp["hour"] = parse_hour_col(tmp, "hour_of_day")
-    g = (tmp.dropna(subset=["hour"])
-            .groupby("hour", dropna=False)
-            .size()
-            .reset_index(name="n"))
-    g = ensure_full_hours(g, on="hour")
-    total = g["n"].sum()
-    g["prop"] = (g["n"] / total) if total > 0 else 0.0
-    return g
+    tmp["hour"] = pd.to_numeric(tmp[SIM_HOUR_COL], errors="coerce").astype("Int64")
+    tmp["queue_seen_at_arrival"] = pd.to_numeric(tmp[SIM_QUEUE_COL], errors="coerce")
+    tab = (tmp.dropna(subset=["hour", "queue_seen_at_arrival"])
+             .groupby("hour", as_index=False)["queue_seen_at_arrival"]
+             .mean()
+             .rename(columns={"queue_seen_at_arrival": "mean_queue"}))
+    return ensure_full_hours(tab, on="hour")
 
-def admitted_mix_table(df: pd.DataFrame) -> pd.DataFrame:
-    tmp = df.copy()
-    tmp["hour"] = parse_hour_col(tmp, "hour_of_day")
-    tmp["admitted"] = pd.to_numeric(tmp["admitted"], errors="coerce").fillna(0).astype(int)
-    g = (tmp.dropna(subset=["hour"])
-            .groupby("hour", dropna=False)["admitted"]
-            .agg(admitted_n=lambda x: int((x == 1).sum()),
-                 n=lambda x: int(x.notna().sum()))
-            .reset_index())
-    g = ensure_full_hours(g, on="hour")
-    g["prop_admitted"] = (g["admitted_n"] + 0.5) / (g["n"] + 1.0)
-    return g
 
-def binomial_nll(obs_tab: pd.DataFrame, sim_tab: pd.DataFrame, eps=1e-9) -> float:
-    m = pd.merge(obs_tab[["hour","k","n"]],
-                 sim_tab[["hour","p"]],
-                 on="hour", how="left")
-    m["p"] = m["p"].fillna(0.5).clip(eps, 1 - eps)
-    return float((-(m["k"] * np.log(m["p"]) + (m["n"] - m["k"]) * np.log(1 - m["p"]))).sum())
+def rmse(a: np.ndarray, b: np.ndarray) -> float:
+    a = np.asarray(a, dtype=float)
+    b = np.asarray(b, dtype=float)
+    m = np.isfinite(a) & np.isfinite(b)
+    if m.sum() == 0:
+        return np.nan
+    return float(np.sqrt(np.mean((a[m] - b[m]) ** 2)))
 
-def total_variation(p: np.ndarray, q: np.ndarray) -> float:
-    p = np.asarray(p, dtype=float); q = np.asarray(q, dtype=float)
-    if p.sum() > 0: p = p / p.sum()
-    if q.sum() > 0: q = q / q.sum()
-    return 0.5 * np.abs(p - q).sum()
 
-def admitted_wmse(obs_tab: pd.DataFrame, sim_tab: pd.DataFrame) -> float:
-    m = pd.merge(obs_tab[["hour", "n", "prop_admitted"]],
-                 sim_tab[["hour", "prop_admitted"]],
-                 on="hour", how="left",
-                 suffixes=("_obs", "_sim"))
-    m["prop_admitted_sim"] = m["prop_admitted_sim"].fillna(0.5)
-    w = m["n"].astype(float)
-    diff2 = (m["prop_admitted_sim"] - m["prop_admitted_obs"]) ** 2
-    denom = w.sum()
-    return float((w * diff2).sum() / denom) if denom > 0 else float(diff2.mean())
+# ----------------------------- Output -------------------------------
 
 def summarize_tis(vec_like) -> dict:
     v = pd.to_numeric(pd.Series(vec_like), errors="coerce").dropna().to_numpy()
@@ -238,66 +161,56 @@ def summarize_tis(vec_like) -> dict:
     }
 
 # --------------------------- Load observed ---------------------------
-observed_raw = pd.read_csv(OBS_PATH)
 
-# Normalise observed to required columns
-obs_df = pd.DataFrame()
-# time_in_system
-obs_tis_col = _first_existing(observed_raw, POSSIBLE_TIS + ["time_in_system"])
-if obs_tis_col is None:
-    raise KeyError("Observed data missing time-in-system column.")
-obs_df["time_in_system"] = pd.to_numeric(observed_raw[obs_tis_col], errors="coerce")
 
-# hour_of_day
-obs_hour_col = _first_existing(observed_raw, POSSIBLE_HOUR + ["hour_of_day"])
-if obs_hour_col is None:
-    raise KeyError("Observed data missing hour column (e.g., 'hour_of_day').")
-obs_df["hour_of_day"] = _coerce_hour_series(observed_raw[obs_hour_col])
+obs_tis_raw = pd.read_csv(OBS_TIS_PATH)
 
-# admitted
-obs_adm_col = _first_existing(observed_raw, POSSIBLE_ADMIT + ["admitted"])
-if obs_adm_col is None:
-    raise KeyError("Observed data missing admitted/Disposition column.")
-if observed_raw[obs_adm_col].dtype.kind in "biufc":
-    obs_df["admitted"] = pd.to_numeric(observed_raw[obs_adm_col], errors="coerce").fillna(0).astype(int)
-else:
-    obs_df["admitted"] = observed_raw[obs_adm_col].map(_map_admitted_from_dispo).fillna(0).astype(int)
+if "time_in_system" not in obs_tis_raw.columns:
+    raise KeyError("Observed TIS file missing 'time_in_system' column.")
 
-# Distribution checks (KS, mean)
-obs_values = obs_df["time_in_system"].dropna().to_numpy()
+obs_tis_df = pd.DataFrame({
+    "time_in_system": pd.to_numeric(obs_tis_raw["time_in_system"], errors="coerce")
+})
+
+obs_values = obs_tis_df["time_in_system"].dropna().to_numpy()
 obs_tis_summary = summarize_tis(obs_values)
 
-# Hourly profiles from observed
-obs_breach_hour = breach_table(obs_df)
-obs_arrivals_hour = arrivals_table(obs_df)
-obs_admitted_hour = admitted_mix_table(obs_df)
+# --- Observed queue at arrival ---
+obs_queue_raw = pd.read_csv(OBS_QUEUE_PATH)
+
+required_q = ["queue_seen_at_arrival", "hour_of_day"]
+missing_q = [c for c in required_q if c not in obs_queue_raw.columns]
+if missing_q:
+    raise KeyError(f"Observed queue file missing required columns: {missing_q}")
+
+obs_queue_df = pd.DataFrame({
+    "queue_seen_at_arrival": pd.to_numeric(obs_queue_raw["queue_seen_at_arrival"], errors="coerce"),
+    "hour_of_day": obs_queue_raw["hour_of_day"],  # e.g. '21:00'
+})
+
+obs_queue_values  = obs_queue_df["queue_seen_at_arrival"].dropna().to_numpy()
+obs_queue_summary = summarize_tis(obs_queue_values)
+obs_queue_profile = queue_profile_table(obs_queue_df)
+
 
 # ------------------------------ Run grid ----------------------------
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
 grid_rows = []
 tis_rows = []
-breach_profile_rows = []
-arrivals_profile_rows = []
-admitted_profile_rows = []
+queue_rows = []
+
 
 for mu in mus:
     for sigma in sigmas:
-        sim_df = run_model_df(global_params, mu, sigma, total_runs=TOTAL_RUNS)
+        print(f"Running mu={mu}, sigma={sigma}")
+        raw = run_model_outputs(global_params, mu, sigma, total_runs=TOTAL_RUNS)
 
-        # Profiles
-        sim_breach_hour   = breach_table(sim_df)
-        sim_arrivals_hour = arrivals_table(sim_df)
-        sim_admitted_hour = admitted_mix_table(sim_df)
+        # --- TIS normalised ---
+        sim_df = _normalise_sim_output(raw["patients"])
+        sim_values = sim_df["time_in_system"].to_numpy()
 
-        # Metrics
-        hourly_nll = binomial_nll(obs_breach_hour, sim_breach_hour)
-        arrival_tv = total_variation(obs_arrivals_hour["prop"].values,
-                                     sim_arrivals_hour["prop"].values)
-        adm_wmse   = admitted_wmse(obs_admitted_hour, sim_admitted_hour)
-
-        # KS & mean diff for total distribution
-        sim_values = sim_df["time_in_system"].dropna().to_numpy()
+        # --- TIS metrics ---
         if sim_values.size >= 2 and obs_values.size >= 2:
             ks_stat, ks_p = ks_2samp(sim_values, obs_values)
             sim_mean = float(sim_values.mean())
@@ -305,74 +218,72 @@ for mu in mus:
         else:
             ks_stat = ks_p = sim_mean = mean_diff = np.nan
 
-        # Grid metrics row
+        # =======================
+        # Queue length metrics
+        # =======================
+        sim_patients_raw = raw["patients"]
+
+        # Distribution (KS + mean diff)
+        sim_queue_values = pd.to_numeric(sim_patients_raw.get(SIM_QUEUE_COL), errors="coerce") \
+                             .dropna().to_numpy()
+
+        if sim_queue_values.size >= 2 and obs_queue_values.size >= 2:
+            q_ks_stat, q_ks_p = ks_2samp(sim_queue_values, obs_queue_values)
+            sim_q_mean = float(sim_queue_values.mean())
+            q_mean_diff = abs(sim_q_mean - float(obs_queue_summary["mean"]))
+        else:
+            q_ks_stat = q_ks_p = sim_q_mean = q_mean_diff = np.nan
+
+        # Hourly profile (RMSE)
+        if SIM_HOUR_COL in sim_patients_raw.columns and SIM_QUEUE_COL in sim_patients_raw.columns:
+            sim_queue_profile = queue_profile_table_sim(
+                sim_patients_raw[[SIM_HOUR_COL, SIM_QUEUE_COL]].copy()
+            )
+            q_hourly_rmse = rmse(
+                sim_queue_profile["mean_queue"].to_numpy(),
+                obs_queue_profile["mean_queue"].to_numpy()
+            )
+        else:
+            q_hourly_rmse = np.nan
+
+        # --- Collect grid row ---
         grid_rows.append({
             "mu": mu, "sigma": sigma,
-            "hourly_nll": hourly_nll,
-            "arrival_tv": arrival_tv,
-            "admitted_prop_wmse": adm_wmse,
+
+            # TIS
             "ks_stat": ks_stat, "ks_p": ks_p,
             "sim_mean": sim_mean, "obs_mean": obs_tis_summary["mean"],
             "mean_diff": mean_diff,
-            "n_sim": int(sim_values.size)
+            "n_sim": int(sim_values.size),
+
+            # Queue length
+            "q_ks_stat": q_ks_stat, "q_ks_p": q_ks_p,
+            "sim_q_mean": sim_q_mean, "obs_q_mean": float(obs_queue_summary["mean"]),
+            "q_mean_diff": q_mean_diff,
+            "q_hourly_rmse": q_hourly_rmse,
+            "n_sim_queue": int(sim_queue_values.size),
         })
 
-        # TIS summaries (dup observed per param for easy joins)
+        # --- Summaries ---
         sim_tis_summary = summarize_tis(sim_values)
         tis_rows.append({"mu": mu, "sigma": sigma, "label": "Observed", **obs_tis_summary})
         tis_rows.append({"mu": mu, "sigma": sigma, "label": "DES", **sim_tis_summary})
 
-        # Breach profiles
-        tmp_obs_b = obs_breach_hour.copy()
-        tmp_obs_b.insert(0, "sigma", sigma); tmp_obs_b.insert(0, "mu", mu)
-        tmp_obs_b.insert(2, "label", "Observed")
-        breach_profile_rows.append(tmp_obs_b)
+        # --- Queue summaries ---
+        sim_queue_summary = summarize_tis(sim_queue_values)
+        queue_rows.append({"mu": mu, "sigma": sigma, "label": "Observed", **obs_queue_summary})
+        queue_rows.append({"mu": mu, "sigma": sigma, "label": "DES", **sim_queue_summary})
 
-        tmp_sim_b = sim_breach_hour.copy()
-        tmp_sim_b.insert(0, "sigma", sigma); tmp_sim_b.insert(0, "mu", mu)
-        tmp_sim_b.insert(2, "label", "DES")
-        breach_profile_rows.append(tmp_sim_b)
-
-        # Arrivals per hour
-        tmp_obs_a = obs_arrivals_hour.copy()
-        tmp_obs_a.insert(0, "sigma", sigma); tmp_obs_a.insert(0, "mu", mu)
-        tmp_obs_a.insert(2, "label", "Observed")
-        arrivals_profile_rows.append(tmp_obs_a)
-
-        tmp_sim_a = sim_arrivals_hour.copy()
-        tmp_sim_a.insert(0, "sigma", sigma); tmp_sim_a.insert(0, "mu", mu)
-        tmp_sim_a.insert(2, "label", "DES")
-        arrivals_profile_rows.append(tmp_sim_a)
-
-        # Admitted mix by hour
-        tmp_obs_adm = obs_admitted_hour.copy()
-        tmp_obs_adm.insert(0, "sigma", sigma); tmp_obs_adm.insert(0, "mu", mu)
-        tmp_obs_adm.insert(2, "label", "Observed")
-        admitted_profile_rows.append(tmp_obs_adm)
-
-        tmp_sim_adm = sim_admitted_hour.copy()
-        tmp_sim_adm.insert(0, "sigma", sigma); tmp_sim_adm.insert(0, "mu", mu)
-        tmp_sim_adm.insert(2, "label", "DES")
-        admitted_profile_rows.append(tmp_sim_adm)
-
-        print(f"mu={mu:.3f}, sigma={sigma:.3f}, n={sim_values.size}, "
-              f"hourly_nll={hourly_nll:.3f}, arrival_tv={arrival_tv:.3f}, "
-              f"admitted_wmse={adm_wmse:.5f}, KS={ks_stat}, mean diff={mean_diff}")
-
+    
 # ------------------------------ Save all -----------------------------
 pd.DataFrame(grid_rows).sort_values(
-    by=["hourly_nll", "arrival_tv", "admitted_prop_wmse", "ks_stat"],
+    by=["ks_stat", "mean_diff", "q_ks_stat", "q_hourly_rmse"],
     ascending=[True, True, True, True]
 ).to_csv(GRID_PATH, index=False)
 
 pd.DataFrame(tis_rows).to_csv(TIS_SUMMARY_PATH, index=False)
-pd.concat(breach_profile_rows, ignore_index=True).to_csv(BREACH_PROFILES_PATH, index=False)
-pd.concat(arrivals_profile_rows, ignore_index=True).to_csv(ARRIVALS_PROFILES_PATH, index=False)
-pd.concat(admitted_profile_rows, ignore_index=True).to_csv(ADMITTED_MIX_PROFILES_PATH, index=False)
+pd.DataFrame(queue_rows).to_csv(QUEUE_SUMMARY_PATH, index=False)
 
 print("\nSaved:")
 print(f"  - {GRID_PATH}")
 print(f"  - {TIS_SUMMARY_PATH}")
-print(f"  - {BREACH_PROFILES_PATH}")
-print(f"  - {ARRIVALS_PROFILES_PATH}")
-print(f"  - {ADMITTED_MIX_PROFILES_PATH}")

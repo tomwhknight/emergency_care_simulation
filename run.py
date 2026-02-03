@@ -1,7 +1,7 @@
 # run.py
 
 
-USE_ALT_MODEL = False  # Set to False to use the original model
+USE_ALT_MODEL = True # Set to False to use the original model
 
 if USE_ALT_MODEL:
     from src.trial_alt import AltTrial as Trial
@@ -30,8 +30,8 @@ from src.helper import rota_peak, save_rota_check, save_params
 
 shift_patterns_weekday = [
     # Tier 1 Resident
-    {"role": "tier_1", "shift_name": "Early",     "start": "08:00", "end": "16:00", "count": 7, "breaks": 1},
-    {"role": "tier_1", "shift_name": "Middle_1",  "start": "12:00", "end": "22:00", "count": 5, "breaks": 2},
+    {"role": "tier_1", "shift_name": "Early",     "start": "08:00", "end": "16:00", "count": 8, "breaks": 1},
+    {"role": "tier_1", "shift_name": "Middle_1",  "start": "12:00", "end": "22:00", "count": 4, "breaks": 2},
     {"role": "tier_1", "shift_name": "Twilight",  "start": "16:00", "end": "00:00", "count": 5, "breaks": 1},
     {"role": "tier_1", "shift_name": "Night",     "start": "22:00", "end": "08:00", "count": 3, "breaks": 2},
 
@@ -73,8 +73,8 @@ shift_patterns_weekend = [
 ]
 global_params = GlobalParameters(
 
-    ambulance_proportion = 20,
-    walk_in_proportion = 80,
+    ambulance_proportion = 0.2,
+    walk_in_proportion = 0.8,
 
     # Source of referral
     proportion_direct_primary_care = 0.01,  
@@ -108,64 +108,80 @@ global_params = GlobalParameters(
 
     # SDEC capacity
     sdec_open_hour = 7, 
-    sdec_close_hour = 17,
+    sdec_close_hour = 18,
 
     weekday_sdec_base_capacity = 6,
     weekend_sdec_base_capacity = 5, 
 
     # AMU capacity
-    max_amu_available_beds = 2,
+    max_amu_available_beds = 56,
+    amu_queue_soft = 10,
+    amu_queue_hard =  25,
+    amu_surge_max_scale = 1.10,
     max_sdec_capacity = 5,
 
     # Service times
-    mu_triage_assessment_time = 1.85,
-    sigma_triage_assessment_time = 0.4,
+    mu_triage_assessment_time = 1.0,
+    sigma_triage_assessment_time = 0.7,
 
-    mu_ed_service_time = 3.95, 
-    sigma_ed_service_time = 0.40, 
+    mu_ed_service_time = 4.00, 
+    sigma_ed_service_time = 0.45, 
 
     mu_ed_decision_time = 4.20, 
     sigma_ed_decision_time = 0.95, 
+    joint_gamma = 0.5,
 
-    mu_medical_service_time = 4.11,
+    # Params to emulate the 240 min breach boudnary 
+
+    decision_hazard_strength_240  = 0.175,
+    adjustment_start = 240,
+    adjustment_end = 300, 
+
+    mu_medical_service_time = 4.35,
     sigma_medical_service_time = 0.55,
 
-    max_medical_service_time =  240,
-    min_medical_service_time = 30, 
-
-    mu_consultant_assessment_time = 3.2,
-    sigma_consultant_assessment_time = 0.32, 
+    mu_consultant_assessment_time = 2.95,
+    sigma_consultant_assessment_time = 0.30, 
 
     # Routing logic
 
     sdec_prob_threshold = 0.10,
     paediatric_referral_rate = 0.10,
+    prob_referral_to_medicine_adult = 0.525, 
+    
+    initial_medicine_discharge_prob = 0.00,
+    consultant_discharge_prob = 0.20,
+      
+    mu_surgical_bed_delay = 5.20,
+    sigma_surgical_bed_delay = 1.00,
 
-    initial_medicine_discharge_prob = 0.05,
-    consultant_discharge_prob = 0.35,
-
-    # Threshold for scerio analysis
-
-    direct_triage_threshold = None, # Run None for no threshold applied
+    # Routing / scenario analysis
+    direct_triage_threshold = None,  # None = no direct triage rule applied
 
     # Simulation
 
-    simulation_time = 44640,
-    cool_down_time = 1440,
-    burn_in_time = 2880)  # burn in to prevent initiation bias 
+    simulation_time = 56160,
+    cool_down_time = 2880,
+    burn_in_time = 10080)  # burn in to prevent initiation bias 
+
+
+# Scenario / sensitivity settings – set in run, not baked into GlobalParameters constructor
+global_params.referral_sensitivity_on = True
+global_params.referral_odds_multiplier = 1.90
+global_params.scenario_name = None
+
 
 global_params.max_ed_doctor_capacity = max(
     rota_peak(shift_patterns_weekday),
-    rota_peak(shift_patterns_weekend)
-)
+    rota_peak(shift_patterns_weekend), 
+    ) + 2
 
 MASTER_SEED = 20251001   # Master SEED for all process RNGs
 
 if __name__ == "__main__":
-    trial = Trial(global_params, MASTER_SEED)
-    
+    trial = Trial(global_params, MASTER_SEED) 
     t0 = time.perf_counter()
-    info = trial.run(run_number=5)
+    info = trial.run(run_number=20)
     elapsed = time.perf_counter() - t0
     
     # Create folder for each batch           
@@ -180,7 +196,7 @@ if __name__ == "__main__":
     os.makedirs(batch_dir, exist_ok=True)
 
     # --- Print a quick summary to console ---
-    total_runs = info.get("total_runs", 1)   # fallback to what you passed in
+    total_runs = info.get("total_runs", 20)   # fallback to what you passed in
     secs_per_run = elapsed / max(1, total_runs)
     print(
         f" Runtime: {elapsed:,.1f}s "

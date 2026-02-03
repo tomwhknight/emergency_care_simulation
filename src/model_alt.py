@@ -1,5 +1,6 @@
 # src/model_alt.py
 import numpy as np
+import pandas as pd
 from src.model import Model
 from src.helper import extract_hour
 from src.helper import exp_rv, wchoice, bern 
@@ -35,41 +36,30 @@ class AltModel(Model):
             self._policy_label = "clinical_only"     
 
     def ed_or_direct(self, patient):
-        """
-        After SDEC rejects/closed/no capacity:
-        1) Decide Medicine intent with p_cal (Bernoulli) – once.
-        2) If not Medicine → ED.
-        3) If Medicine → clinical screen; if a cutoff is set, also require p_raw ≥ cutoff.
-        """
-
-        # 1) Medicine intent (rate control) — do once
-        if getattr(patient, "medicine_intent", None) is None:
-            patient.medicine_intent = bern(patient.referral_prob_cal, self.rng_probs)
-            self.record_result(patient.id, "Referral Medicine", bool(patient.medicine_intent))
-
-        if not patient.medicine_intent:
-            # Not Medicine → always ED path
+        # If they’re not even an ANY-referral candidate, just do ED.
+        if not getattr(patient, "referral_intent", False):
             self.record_result(patient.id, "DT Eligible", False)
             self.record_result(patient.id, "Pathway Start", "ED")
-            self.record_result(patient.id, "DT Block Reason", "Not Medicine Intent")
+            self.record_result(patient.id, "DT Block Reason", "Not Any-Referral Intent")
             return self.env.process(self.ed_assessment(patient))
 
-        # 2) Route policy for Medicine-intent patients
-        th = self._dt_threshold  # ← already materialised in __init__ (raw cutoff or NaN)
+        # --- CHANGED: gate on arrival-time intent (medicine subset), plus clinical gates, plus optional threshold ---
         news_ok   = (patient.news2 <= 4)
         acuity_ok = (patient.acuity != 1)
+        th        = self._dt_threshold
 
-        if np.isfinite(th):
-            eligible = news_ok and acuity_ok and (patient.referral_score_raw >= th)
-            block_reason = None if eligible else (
-                "Clinical screen" if not (news_ok and acuity_ok) else "Score<threshold"
-            )
-        else:
-            # clinical-only mode (no raw cutoff)
-            eligible = news_ok and acuity_ok
-            block_reason = None if eligible else "Clinical screen"
+        intent_any = bool(getattr(patient, "referral_intent", False))
+        intent_med = bool(getattr(patient, "intend_medicine", False))
 
+        eligible = (
+            intent_any
+            and intent_med
+            and news_ok
+            and acuity_ok
+            and (not np.isfinite(th) or patient.referral_score_raw >= th)
+        )
         self.record_result(patient.id, "DT Eligible", bool(eligible))
+        self.record_result(patient.id, "DT Threshold", self._dt_threshold)
 
         if eligible:
             self.record_result(patient.id, "Pathway Start", "Direct-Medicine")
@@ -77,12 +67,22 @@ class AltModel(Model):
             self.record_result(patient.id, "DT Block Reason", np.nan)
             return self.env.process(self.direct_triage_to_medicine(patient))
         else:
+            # --- CHANGED: clearer block reason so you can audit what stopped DT ---
+            if not intent_med:
+                reason = "Not Medicine subset"
+            elif not (news_ok and acuity_ok):
+                reason = "Clinical screen"
+            elif np.isfinite(th) and not (patient.referral_score_raw >= th):
+                reason = "Score<threshold"
+            else:
+                reason = "Other"
             self.record_result(patient.id, "Pathway Start", "ED")
             self.record_result(patient.id, "ED Pathway Subtype", "ED—Medicine")
-            self.record_result(patient.id, "DT Block Reason", block_reason)
+            self.record_result(patient.id, "DT Block Reason", reason)
             return self.env.process(self.ed_assessment(patient))
 
-        
+
+
     def direct_triage_to_medicine(self, patient):
         """Bypass ED assessment—refer straight to Medicine (SDEC already rejected)."""
         # Keep disposition label identical so existing reports work
@@ -100,7 +100,7 @@ class AltModel(Model):
         # Standard post-referral pipeline (unchanged)
         self.env.process(self.refer_to_amu_bed(patient))
         yield self.env.process(self.initial_medical_assessment(patient))
-    
+
     # ---------- Only override: SDEC accepted path unchanged; fallback becomes ed_or_direct ----------
     def refer_to_sdec(self, patient, fallback_process):
         """SDEC unchanged for Accepted. If Rejected/Closed/No capacity -> ed_or_direct()."""

@@ -312,7 +312,6 @@ def save_rota_check(patterns, out_dir, filename="rota_check.csv",
     df.to_csv(path, index=False)
     return path
 
-
 def _to_jsonable(x):
     # numpy scalars/arrays
     if isinstance(x, (np.integer, np.floating)):

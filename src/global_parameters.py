@@ -24,20 +24,28 @@ class GlobalParameters:
                 weekend_sdec_base_capacity,
                 sdec_prob_threshold,
                 max_amu_available_beds,
+                amu_queue_soft, 
+                amu_queue_hard,
+                amu_surge_max_scale,
                 mu_triage_assessment_time,
                 sigma_triage_assessment_time,
                 mu_ed_service_time,
                 sigma_ed_service_time,
                 mu_ed_decision_time,
                 sigma_ed_decision_time,
+                joint_gamma,
+                decision_hazard_strength_240,
+                adjustment_start,
+                adjustment_end,
                 mu_medical_service_time,
                 sigma_medical_service_time,
-                max_medical_service_time,
-                min_medical_service_time,
                 initial_medicine_discharge_prob,
                 consultant_discharge_prob,
                 mu_consultant_assessment_time,
                 sigma_consultant_assessment_time,
+                mu_surgical_bed_delay,
+                sigma_surgical_bed_delay,
+                prob_referral_to_medicine_adult,
                 direct_triage_threshold,
                 burn_in_time,
                 cool_down_time,
@@ -78,8 +86,6 @@ class GlobalParameters:
             # Medicine discharge probabilities
             self.initial_medicine_discharge_prob = initial_medicine_discharge_prob
             self.consultant_discharge_prob = consultant_discharge_prob
-           
-
         
             # Define the resources
             self.ambulance_triage_nurse_capacity = ambulance_triage_nurse_capacity
@@ -96,7 +102,10 @@ class GlobalParameters:
             # Define store values 
             self.max_amu_available_beds = max_amu_available_beds # refers max available to transfer at any point (not total AMU capacity)
             self.max_sdec_capacity = max_sdec_capacity # refers max available to transfer at any point (not total SDEC capacity)
-        
+            self.amu_queue_soft = amu_queue_soft
+            self.amu_queue_hard = amu_queue_hard
+            self.amu_surge_max_scale = amu_surge_max_scale
+
             self.sdec_open_hour = sdec_open_hour   # SDEC opens at 08:00
             self.sdec_close_hour = sdec_close_hour # SDEC stops accepting referrals at 18:00
 
@@ -114,18 +123,24 @@ class GlobalParameters:
 
             self.mu_ed_decision_time = mu_ed_decision_time
             self.sigma_ed_decision_time = sigma_ed_decision_time
-        
+
+            self.joint_gamma = joint_gamma
+            self.decision_hazard_strength_240  = decision_hazard_strength_240 
+            self.adjustment_start = adjustment_start
+            self.adjustment_end = adjustment_end
+
             self.mu_medical_service_time =  mu_medical_service_time
             self.sigma_medical_service_time =  sigma_medical_service_time
-
-            self.max_medical_service_time = max_medical_service_time
-            self.min_medical_service_time = min_medical_service_time 
 
             self.mu_consultant_assessment_time   = mu_consultant_assessment_time
             self.sigma_consultant_assessment_time = sigma_consultant_assessment_time
 
+            self.mu_surgical_bed_delay = mu_surgical_bed_delay
+            self.sigma_surgical_bed_delay = sigma_surgical_bed_delay
+
             # Scenerio analysis
 
+            self.prob_referral_to_medicine_adult = prob_referral_to_medicine_adult
             self.direct_triage_threshold = direct_triage_threshold
 
             # Sim duration
@@ -138,3 +153,14 @@ class GlobalParameters:
             self.seed_service: int | None   = None   # all service-time distributions
             self.seed_probs: int | None     = None   # Bernoulli & weighted choices
             self.seed_resources: int | None = None   # Poisson counts & jitter/uniforms
+
+            # --- Referral sensitivity analysis (defaults: OFF) ---
+            
+            # If True, we will up-/down-scale the odds of referral for adults.
+            # SDEC rules still use the original calibrated probability.
+            self.referral_sensitivity_on = False          # master switch
+            self.referral_odds_multiplier = 1.0           # 1.0 = baseline (no change)
+
+            # Label for scenario-level outputs (used by AltModel / AltTrial)
+            self.scenario_name = "alt_baseline"
+

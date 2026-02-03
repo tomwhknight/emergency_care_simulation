@@ -14,12 +14,10 @@ class AltTrial:
     (no per-run folders) into a scenario/batch directory.
 
     Output layout (per batch):
-      <base_output_dir>/<scenario>/batch_YYYYmmdd_HHMMSS/
+      <base_output_dir>/<scenario>/batch_YYYYmmdd_HHMMSS__<policy_label>/
         - alt_results.csv
         - alt_event_log.csv
-        - alt_summary_hourly.csv
-        - alt_summary_daily.csv
-        - alt_summary_complete.csv
+        - alt_summary_complete_allruns.csv
         - alt_queue_ed_assessment.csv
         - alt_queue_medical.csv
         - alt_queue_consultant.csv
@@ -40,20 +38,34 @@ class AltTrial:
         # In-memory aggregates
         self.agg_results_df = pd.DataFrame()
         self.agg_event_log = pd.DataFrame(columns=["run_number", "patient_id", "event", "timestamp"])
-        self.agg_results_hourly = pd.DataFrame()
-        self.agg_results_daily = pd.DataFrame()
+        self.agg_results_hourly = pd.DataFrame()   # kept for parity with Trial, but not used
+        self.agg_results_daily = pd.DataFrame()    # kept for parity with Trial, but not used
         self.agg_results_complete = pd.DataFrame()
+
         self.agg_ed_assessment_queue_monitoring_df = pd.DataFrame(
             columns=["Simulation Time", "Hour of Day", "Queue Length"]
         )
-
         self.agg_medical_queue_monitoring_df = pd.DataFrame(
             columns=["Simulation Time", "Hour of Day", "Queue Length"]
         )
-
         self.agg_consultant_queue_monitoring_df = pd.DataFrame(
             columns=["Simulation Time", "Hour of Day", "Queue Length"]
         )
+
+        self.agg_ed_doctor_block_monitoring_df = pd.DataFrame(columns=[
+            "Simulation Time", "Hour of Day", "Physical Capacity",
+            "Rota Blockers", "Break Blockers", "Total Blockers",
+            "Effective Capacity", "Active Patient Users", "Patient Queue Length",
+            "Desired From Rota", "Run Number"]
+            )
+        
+        self.agg_resource_monitoring_df = pd.DataFrame(columns=[
+            "Run Number", "Simulation Time", "Hour of Day",
+            "Resource", "Physical Capacity", "Active Blockers",
+            "Effective Capacity", "In Use (Patients)", "Queue (Patients)"]
+            )
+
+
         self.agg_amu_queue_df = pd.DataFrame()
         self.seed_manifest = []
 
@@ -99,10 +111,13 @@ class AltTrial:
         # Batch root for this set of runs
         scenario_dir = os.path.join(
             self.base_output_dir,
-            scenario_name,                                 
-            f"batch_{self.batch_id}__{label}"              
+            scenario_name,
+            f"batch_{self.batch_id}__{label}"
         )
         os.makedirs(scenario_dir, exist_ok=True)
+
+        # Mirror Trial: buffer only 'complete' per-run summaries and aggregate at the end
+        buf_complete = []
 
         for i in range(run_number):
             run_idx = i + 1
@@ -123,11 +138,12 @@ class AltTrial:
             # Event log (already includes run_number)
             self.agg_event_log = pd.concat([self.agg_event_log, model.event_log_df], ignore_index=True)
 
-            # Summaries
-            hourly, daily, complete = model.outcome_measures()
-            self.agg_results_hourly = pd.concat([self.agg_results_hourly, hourly], ignore_index=True)
-            self.agg_results_daily = pd.concat([self.agg_results_daily, daily], ignore_index=True)
-            self.agg_results_complete = pd.concat([self.agg_results_complete, complete], ignore_index=True)
+            # Summaries — mirror Trial: buffer only 'complete' per-run
+            complete = model.outcome_measures()
+            if isinstance(complete, tuple):
+                # AltModel may return (hourly, daily, complete)
+                complete = complete[-1]
+            buf_complete.append(complete)
 
             # Queues (tag with run for traceability)
             ed_q = model.ed_assessment_queue_monitoring_df.copy()
@@ -148,6 +164,14 @@ class AltTrial:
                 [self.agg_consultant_queue_monitoring_df, cons_q], ignore_index=True
             )
 
+            resmon = model.resource_monitoring_df.copy()
+            resmon["Run Number"] = run_idx 
+            self.agg_resource_monitoring_df = pd.concat(
+                [self.agg_resource_monitoring_df, resmon],
+                ignore_index=True
+            )
+
+
             amu_q = model.amu_queue_df.copy()
             amu_q["Run Number"] = run_idx
             self.agg_amu_queue_df = pd.concat([self.agg_amu_queue_df, amu_q], ignore_index=True)
@@ -156,26 +180,48 @@ class AltTrial:
                 pct = int(run_idx / run_number * 100)
                 progress_bar.progress(pct, text=f"[ALT] Running simulation... {pct}%")
 
+        # Build complete summary across runs in one shot (mirror Trial)
+        self.agg_results_complete = (
+            pd.concat(buf_complete, ignore_index=True) if buf_complete else pd.DataFrame()
+        )
+
+        tmp = self.agg_results_complete.copy()
+        if "mean_value" in tmp.columns:
+            tmp["mean_value"] = pd.to_numeric(tmp["mean_value"], errors="coerce")
+            self.agg_results_complete = (
+                tmp.groupby(["measure"], dropna=False, as_index=False)["mean_value"]
+                .mean()
+                .rename(columns={"mean_value": "mean_across_runs"})
+            )
+
         # --- Write ONE set of aggregated outputs for the whole batch ---
         self.agg_results_df.to_csv(os.path.join(scenario_dir, "alt_results.csv"), index=False)
         self.agg_event_log.to_csv(os.path.join(scenario_dir, "alt_event_log.csv"), index=False)
-        self.agg_results_hourly.to_csv(os.path.join(scenario_dir, "alt_summary_hourly.csv"), index=False)
-        self.agg_results_daily.to_csv(os.path.join(scenario_dir, "alt_summary_daily.csv"), index=False)
-        self.agg_results_complete.to_csv(os.path.join(scenario_dir, "alt_summary_complete.csv"), index=False)
+
+        # Mirror Trial naming for the complete summary
+        self.agg_results_complete.to_csv(
+            os.path.join(scenario_dir, "alt_summary_complete_allruns.csv"), index=False
+        )
+
         self.agg_ed_assessment_queue_monitoring_df.to_csv(
             os.path.join(scenario_dir, "alt_queue_ed_assessment.csv"), index=False
         )
         self.agg_consultant_queue_monitoring_df.to_csv(
             os.path.join(scenario_dir, "alt_queue_consultant.csv"), index=False
         )
-
         self.agg_medical_queue_monitoring_df.to_csv(
             os.path.join(scenario_dir, "alt_queue_medical.csv"), index=False
         )
-
         self.agg_amu_queue_df.to_csv(
             os.path.join(scenario_dir, "alt_queue_amu.csv"), index=False
         )
+
+
+        self.agg_resource_monitoring_df.to_csv(
+                    os.path.join(scenario_dir, "baseline_resource_monitor.csv"),
+                    index=False
+        )
+
         pd.DataFrame(self.seed_manifest).to_csv(
             os.path.join(scenario_dir, "alt_seed_manifest.csv"), index=False
         )
@@ -185,8 +231,8 @@ class AltTrial:
             "scenario_dir": scenario_dir,
             "patients": self.agg_results_df,
             "events": self.agg_event_log,
-            "hourly": self.agg_results_hourly,
-            "daily": self.agg_results_daily,
+            "hourly": self.agg_results_hourly,      # empty (parity with Trial)
+            "daily": self.agg_results_daily,        # empty (parity with Trial)
             "complete": self.agg_results_complete,
             "queue_ed": self.agg_ed_assessment_queue_monitoring_df,
             "queue_consultant": self.agg_consultant_queue_monitoring_df,

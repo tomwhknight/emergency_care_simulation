@@ -64,6 +64,13 @@ class Trial:
             "Desired From Rota", "Run Number"
         ])
 
+        self.agg_resource_monitoring_df = pd.DataFrame(columns=[
+            "Run Number", "Simulation Time", "Hour of Day",
+            "Resource", "Physical Capacity", "Active Blockers",
+            "Effective Capacity", "In Use (Patients)", "Queue (Patients)"
+        ])
+
+
         self.agg_calibration_summary = pd.DataFrame(
             columns=["measure","mean_value","run_number","Scenario","DT Threshold"]
         )
@@ -157,6 +164,14 @@ class Trial:
                 ignore_index=True
             )
 
+            resmon = model.resource_monitoring_df.copy()
+            resmon["Run Number"] = run_idx 
+            self.agg_resource_monitoring_df = pd.concat(
+                [self.agg_resource_monitoring_df, resmon],
+                ignore_index=True
+            )
+
+
             # Calibration aggregates
             if hasattr(model, "calibration_summary"):
                 self.agg_calibration_summary = pd.concat(
@@ -213,6 +228,11 @@ class Trial:
         )
         self.agg_ed_doctor_block_monitoring_df.to_csv(
             os.path.join(scenario_dir, "baseline_ed_doctor_blocks.csv"), index=False
+        )
+
+        self.agg_resource_monitoring_df.to_csv(
+            os.path.join(scenario_dir, "baseline_resource_monitor.csv"),
+            index=False
         )
 
         self.agg_calibration_summary.to_csv(
