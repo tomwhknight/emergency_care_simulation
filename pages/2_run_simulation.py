@@ -2,9 +2,9 @@ import streamlit as st
 import pandas as pd
 
 from src.base_params import build_global_params, MASTER_SEED
-from src.trial import Trial
-from src.trial_alt import AltTrial
-from src.trial_alt2 import AltTrial2
+from src.trial_streamlit import TrialStreamlit
+from src.trial_alt_streamlit import AltTrialStreamlit
+from src.trial_alt2_streamlit import AltTrial2Streamlit
 
 
 # =====================================================
@@ -146,17 +146,17 @@ global_params.referral_odds_multiplier = referral_odds_multiplier
 if run_button:
     progress_bar = st.progress(0, text="Starting simulations...")
 
-    baseline_trial = Trial(global_params, MASTER_SEED)
+    baseline_trial = TrialStreamlit(global_params, MASTER_SEED)
     baseline_trial.run(total_runs)
 
     progress_bar.progress(33, text="Baseline complete. Running direct to medicine scenario...")
 
-    alt_trial = AltTrial(global_params, MASTER_SEED)
+    alt_trial = AltTrialStreamlit(global_params, MASTER_SEED)
     alt_trial.run(total_runs)
 
     progress_bar.progress(66, text="Direct to medicine complete. Running direct to consultant scenario...")
 
-    alt2_trial = AltTrial2(global_params, MASTER_SEED)
+    alt2_trial = AltTrial2Streamlit(global_params, MASTER_SEED)
     alt2_trial.run(total_runs)
 
     progress_bar.progress(100, text="Combining results...")
