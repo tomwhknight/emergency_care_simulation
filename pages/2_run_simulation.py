@@ -1,213 +1,212 @@
-# app.py
-
-import plotly.express as px
 import streamlit as st
-from src.global_parameters import GlobalParameters
-from src.trial import Trial
+import pandas as pd
 
-if "trial" not in st.session_state:
-    st.session_state.trial = None
+from src.base_params import build_global_params, MASTER_SEED
+from src.trial import Trial
+from src.trial_alt import AltTrial
+from src.trial_alt2 import AltTrial2
+
+
+# =====================================================
+# Page setup
+# =====================================================
 
 st.set_page_config(layout="wide")
 
-# 1. App Banner
+# =====================================================
+# Session state
+# =====================================================
 
-# Two logos: UoM (left) and MFT (right)
+if "simulation_complete" not in st.session_state:
+    st.session_state.simulation_complete = False
+
+if "trials" not in st.session_state:
+    st.session_state.trials = None
+
+if "all_patient_results" not in st.session_state:
+    st.session_state.all_patient_results = None
+
+if "all_summary_results" not in st.session_state:
+    st.session_state.all_summary_results = None
+
+
+# =====================================================
+# App banner
+# =====================================================
+
 col1, col2, col3 = st.columns([1.25, 2, 1.25])
 
 with col1:
-    st.image("/Users/thomasknight/Desktop/ACL/Side projects/sepsis/uom.jpeg")
+    st.image("assets/uom.jpeg")
 
 with col3:
-    st.image("/Users/thomasknight/Desktop/ACL/Side projects/sepsis/mft.png")
+    st.image("assets/mft.png")
 
-# App title
+# =====================================================
+# Fixed simulation settings
+# =====================================================
 
-st.markdown(
-    """
-    <h1 style='text-align: center; font-size: 2.3em;'>
-         Acute Care Pathway Simulation Dashboard
-    </h1>
-    <p style='text-align: center; font-size: 1.05em; color: gray;'>
-        This dashboard allows users to explore outcomes and identify system bottlenecks in the emergency department, based on a simulated model of acute medical activity under different hypothetical scenarios.
-    </p>
-    """,
-    unsafe_allow_html=True
+burn_in_days = 2
+burn_in_time = burn_in_days * 1440
+
+simulation_days = 7
+user_simulation_time = simulation_days * 1440
+simulation_time = user_simulation_time + burn_in_time
+
+
+# =====================================================
+# Sidebar: run settings
+# =====================================================
+
+st.sidebar.header("Run settings")
+
+st.sidebar.caption(
+    "The model runs for a fixed 7-day simulation period after a 2-day burn-in."
 )
 
-# --- 1. Simulation parameters ---
-
-st.sidebar.header("Simulation Settings")
-
-user_simulation_days = st.slider(
-    "Simulation Time (days)", 
-    min_value=1, 
-    max_value=7, 
-    value=1, 
-    step=1
+total_runs = st.sidebar.slider(
+    "Simulation runs",
+    min_value=0,
+    max_value=10,
+    value=5,
+    step=1,
+    help="Number of repeated model runs. Baseline is 5 runs.",
 )
 
-user_simulation_time = user_simulation_days * 1440
 
-total_runs = st.slider("Number of Simulation Runs", min_value=1, max_value=100, value=5)
+# =====================================================
+# Run simulation
+# =====================================================
 
-burn_in_time = 1440 # burn in to prevent initiation bias
-        
-simulation_time =  user_simulation_time + burn_in_time    
-
-
-
-# --- 1. Capacity ---
-
-st.sidebar.subheader("Capacity")
-
-sdec_open_hour = st.sidebar.slider(
-    "SDEC opening hours ", min_value = 0, max_value= 23, value= 7, step=1
-)
-sdec_close_hour = st.sidebar.slider(
-    "SDEC closing hours ", min_value = 0, max_value= 23, value= 17, step=1 
+st.markdown("### Run simulation")
+st.caption(
+    "Run the baseline model and both alternative models using the selected demand "
+    "assumptions below. Staffing and capacity are fixed at the calibrated baseline values."
 )
 
-# --- 2. Staffing resource ---
+run_button = st.button("▶️ Run simulation", use_container_width=True)
 
-st.sidebar.subheader("Staffing")
 
-walk_in_triage_nurse_capacity = st.sidebar.number_input(
-    "Walk in triage nurse capacity", min_value=2, max_value= 5, value=2, step=1
+# =====================================================
+# Demand controls
+# =====================================================
+
+st.markdown("### Demand assumptions")
+st.caption(
+    "Adjust demand around the baseline scenario. A value of 0% means no change "
+    "from the calibrated baseline."
 )
 
-ambulance_triage_nurse_capacity = st.sidebar.number_input(
-    "Ambulance triage nurse capacity", min_value=1, max_value=5, value=1, step=1
-)
+col_attendance, col_referrals = st.columns(2)
 
-ed_doctor_capacity = st.sidebar.number_input(
-    "ED doctor capacity", min_value=10, max_value=50, value=20, step=1
-)
+with col_attendance:
+    st.markdown("##### ED attendance")
+    attendance_change_pct = st.slider(
+        "Change from baseline (%)",
+        min_value=-50,
+        max_value=50,
+        value=0,
+        step=10,
+        help="Negative values reduce attendance; positive values increase attendance.",
+    )
 
-medical_doctor_capacity = st.sidebar.number_input(
-    "Medical doctor capacity", min_value=1, max_value=10, value=5, step=1
-)
-
-consultant_capacity = st.sidebar.number_input(
-    "Consultant capacity", min_value=1, max_value=10, value=1, step=1
-)
-
-# --- 5. Fixed parameters ---
-
-global_params = GlobalParameters(
-
-    # Simulation 
-    
-    burn_in_time=burn_in_time,
-    simulation_time=simulation_time,
-
-    # Patient flow proportions
-
-    ambulance_proportion = 20,
-    walk_in_proportion = 80,
-    proportion_direct_primary_care = 0.07,  
-
-     # Patient characteristic variables
-
-    sdec_appropriate_rate = 0.10,
-
-    # ED disposition
-    medical_referral_rate = 0.15,
-    speciality_referral_rate = 0.05,
-    
-    # Fixed bed capacity
-
-    weekday_sdec_base_capacity = 4,
-    weekend_sdec_base_capacity = 4,   
-
-    max_amu_available_beds = 20,
-    max_sdec_capacity = 10,
-
-    # Patient characterstics 
-        
-    ambulance_acuity_probabilities = {
-    1: 0.02,    
-    2: 0.40,  
-    3: 0.50,     
-    4: 0.05,
-    5: 0.01,
-    },  
-
-    walk_in_acuity_probabilities = {
-    1: 0.05,    
-    2: 0.05,  
-    3: 0.40,     
-    4: 0.30,
-    5: 0.20,
-    },  
+with col_referrals:
+    st.markdown("##### Medical referrals")
+    referral_change_pct = st.slider(
+        "Change from baseline (%)",
+        min_value=-50,
+        max_value=50,
+        value=0,
+        step=10,
+        help="Negative values reduce referrals; positive values increase referrals.",
+    )
 
 
+# =====================================================
+# Build parameters from calibrated baseline
+# =====================================================
 
-    # Staffing
-    ambulance_triage_nurse_capacity=ambulance_triage_nurse_capacity,
-    walk_in_triage_nurse_capacity=walk_in_triage_nurse_capacity,
-    ed_doctor_capacity=ed_doctor_capacity,
-    medical_doctor_capacity=medical_doctor_capacity,
-    consultant_capacity=consultant_capacity,
+attendance_multiplier = 1 + attendance_change_pct / 100
+referral_odds_multiplier = 1 + referral_change_pct / 100
 
-    # SDEC capacity
-    sdec_open_hour=sdec_open_hour,
-    sdec_close_hour=sdec_close_hour,
+global_params = build_global_params()
 
-    # Service times
+global_params.burn_in_time = burn_in_time
+global_params.simulation_time = simulation_time
 
- 
-        
-    # Service times
-    mean_triage_assessment_time = 5,
-    stdev_triage_assessment_time = 2,
+global_params.attendance_multiplier = attendance_multiplier
+global_params.referral_sensitivity_on = True
+global_params.referral_odds_multiplier = referral_odds_multiplier
 
-    mu_ed_assessment_discharge = 4.2, 
-    sigma_ed_assessment_discharge = 1.0, 
 
-    wb_shape_ed_assessment_admit = 1.6,
-    wb_scale_ed_assessment_admit = 1/0.01,
+# =====================================================
+# Run all three model scenarios
+# =====================================================
 
-    mu_ed_service_time = 4.4, 
-    sigma_ed_service_time = 0.5,
-    max_ed_service_time = 120,
-    min_ed_service_time = 30,  
+if run_button:
+    progress_bar = st.progress(0, text="Starting simulations...")
 
-    mu_medical_service_time = 4.5,
-    sigma_medical_service_time = 0.68,
+    baseline_trial = Trial(global_params, MASTER_SEED)
+    baseline_trial.run(total_runs)
 
-    max_medical_service_time = 240,
-    min_medical_service_time = 30, 
+    progress_bar.progress(33, text="Baseline complete. Running direct to medicine scenario...")
 
-    mean_consultant_assessment_time = 30,
-    stdev_consultant_assessment_time = 10, 
-    
+    alt_trial = AltTrial(global_params, MASTER_SEED)
+    alt_trial.run(total_runs)
 
-     # Decision Probabilities
+    progress_bar.progress(66, text="Direct to medicine complete. Running direct to consultant scenario...")
 
-    initial_medicine_discharge_prob = 0.05,
-    consultant_discharge_prob = 0.3)
+    alt2_trial = AltTrial2(global_params, MASTER_SEED)
+    alt2_trial.run(total_runs)
 
-    
-# --- Run trial ---
+    progress_bar.progress(100, text="Combining results...")
 
-if st.button("Run Simulation"):
-    progress_bar = st.progress(0, text="Starting simulation...")    
-    
-    trial = Trial(global_params)
-    trial.run(total_runs, progress_bar=progress_bar)  # handles everything internally
-    
-    # Create a placeholder for the progress bar
-    progress_bar = st.progress(0, text="Running simulation...")
-    st.session_state.trial = trial  
+    baseline_results = baseline_trial.agg_results_df.copy()
+    alt_results = alt_trial.agg_results_df.copy()
+    alt2_results = alt2_trial.agg_results_df.copy()
+
+    baseline_results["Scenario"] = "Baseline"
+    alt_results["Scenario"] = "Direct to Medicine"
+    alt2_results["Scenario"] = "Direct to Consultant"
+
+    all_patient_results = pd.concat(
+        [baseline_results, alt_results, alt2_results],
+        ignore_index=True,
+    )
+
+    baseline_summary = baseline_trial.agg_results_complete.copy()
+    alt_summary = alt_trial.agg_results_complete.copy()
+    alt2_summary = alt2_trial.agg_results_complete.copy()
+
+    baseline_summary["Scenario"] = "Baseline"
+    alt_summary["Scenario"] = "Direct to Medicine"
+    alt2_summary["Scenario"] = "Direct to Consultant"
+
+    all_summary_results = pd.concat(
+        [baseline_summary, alt_summary, alt2_summary],
+        ignore_index=True,
+    )
+
+    st.session_state.trials = {
+        "Baseline": baseline_trial,
+        "Direct to Medicine": alt_trial,
+        "Direct to Consultant": alt2_trial,
+    }
+
+    st.session_state.all_patient_results = all_patient_results
+    st.session_state.all_summary_results = all_summary_results
     st.session_state.simulation_complete = True
 
     progress_bar.empty()
     st.success("Simulation complete!")
 
+
+# =====================================================
+# Navigation to results
+# =====================================================
+
 if st.session_state.get("simulation_complete", False):
     st.markdown("---")
-    if st.button("➡️ View Results Summary"):
-        st.switch_page("pages/3_results.py")
-     
 
+    if st.button("➡️ View results summary", use_container_width=True):
+        st.switch_page("pages/3_results.py")

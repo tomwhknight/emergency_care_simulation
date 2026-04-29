@@ -49,7 +49,13 @@ class GlobalParameters:
                 direct_triage_threshold,
                 burn_in_time,
                 cool_down_time,
-                simulation_time):
+                simulation_time,
+                attendance_multiplier=1.0,
+                referral_sensitivity_on=False,
+                referral_odds_multiplier=1.0,
+                app_mode=False,
+                scenario_label="Baseline",
+                ):
 
 
             # Determine the project root directory (parent of src)
@@ -143,6 +149,20 @@ class GlobalParameters:
             self.prob_referral_to_medicine_adult = prob_referral_to_medicine_adult
             self.direct_triage_threshold = direct_triage_threshold
 
+            # Alt (direct-to-medicine): among DT-eligible, proportion who actually go direct
+            self.direct_medicine_uptake_prob = 1.0
+
+            # Alt2 (direct-to-consultant): among Alt2-eligible, proportion who attempt direct consultant
+            self.alt2_direct_consultant_uptake_prob = 1.0
+
+
+            # --- Alt2 staffing redirection (defaults: OFF) ---
+            self.alt2_medical_redirection_on = False
+            self.alt2_redirection_n_medical_to_ed = 3
+            self.alt2_min_medical_capacity_floor = 2
+            self.alt2_redirection_start_hour = 9
+            self.alt2_redirection_end_hour = 21
+
             # Sim duration
             self.burn_in_time = burn_in_time
             self.cool_down_time  = cool_down_time
@@ -155,12 +175,14 @@ class GlobalParameters:
             self.seed_resources: int | None = None   # Poisson counts & jitter/uniforms
 
             # --- Referral sensitivity analysis (defaults: OFF) ---
-            
-            # If True, we will up-/down-scale the odds of referral for adults.
-            # SDEC rules still use the original calibrated probability.
-            self.referral_sensitivity_on = False          # master switch
-            self.referral_odds_multiplier = 1.0           # 1.0 = baseline (no change)
+            self.referral_sensitivity_on = referral_sensitivity_on
+            self.referral_odds_multiplier = referral_odds_multiplier
 
             # Label for scenario-level outputs (used by AltModel / AltTrial)
             self.scenario_name = "alt_baseline"
+
+            # --- Streamlit demo settings ---
+            self.attendance_multiplier = attendance_multiplier
+            self.app_mode = app_mode
+            self.scenario_label = scenario_label
 

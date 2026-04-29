@@ -9,11 +9,9 @@ st.set_page_config(layout="wide")
 col1, col2, col3 = st.columns([1.25, 2, 1.25])
 
 with col1:
-    st.image("/Users/thomasknight/Desktop/ACL/Side projects/sepsis/uom.jpeg")
-
+    st.image("assets/uom.png")
 with col3:
-    st.image("/Users/thomasknight/Desktop/ACL/Side projects/sepsis/mft.png")
-
+    st.image("assets/mft.png")
 
 # --- Title & Intro ---
 st.markdown(

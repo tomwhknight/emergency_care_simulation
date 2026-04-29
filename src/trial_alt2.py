@@ -1,28 +1,29 @@
-# src/trial_alt.py
+# src/trial_alt2.py
 
 import os
 import numpy as np
 import pandas as pd
 
 from datetime import datetime
-from src.model_alt import AltModel  # direct-triage variant
+from src.model_alt2 import AltModel2  # alt-2 variant
 
 
-class AltTrial:
+class AltTrial2:
     """
-    Runs AltModel across N stochastic repetitions and saves ONE aggregated set of CSVs
+    Runs AltModel2 across N stochastic repetitions and saves ONE aggregated set of CSVs
     (no per-run folders) into a scenario/batch directory.
 
     Output layout (per batch):
       <base_output_dir>/<scenario>/batch_YYYYmmdd_HHMMSS__<policy_label>/
-        - alt_results.csv
-        - alt_event_log.csv
-        - alt_summary_complete_allruns.csv
-        - alt_queue_ed_assessment.csv
-        - alt_queue_medical.csv
-        - alt_queue_consultant.csv
-        - alt_queue_amu.csv
-        - alt_seed_manifest.csv
+        - alt_2_results.csv
+        - alt_2_event_log.csv
+        - alt_2_summary_complete_allruns.csv
+        - alt_2_queue_ed_assessment.csv
+        - alt_2_queue_medical.csv
+        - alt_2_queue_consultant.csv
+        - alt_2_queue_amu.csv
+        - alt_2_resource_monitor.csv
+        - alt_2_seed_manifest.csv
     """
 
     def __init__(self, global_params, master_seed, base_output_dir=None):
@@ -57,14 +58,13 @@ class AltTrial:
             "Rota Blockers", "Break Blockers", "Total Blockers",
             "Effective Capacity", "Active Patient Users", "Patient Queue Length",
             "Desired From Rota", "Run Number"]
-            )
-        
+        )
+
         self.agg_resource_monitoring_df = pd.DataFrame(columns=[
             "Run Number", "Simulation Time", "Hour of Day",
             "Resource", "Physical Capacity", "Active Blockers",
             "Effective Capacity", "In Use (Patients)", "Queue (Patients)"]
-            )
-
+        )
 
         self.agg_amu_queue_df = pd.DataFrame()
         self.seed_manifest = []
@@ -77,16 +77,16 @@ class AltTrial:
         ss = np.random.SeedSequence(self.master_seed, spawn_key=(run_idx,))
         s_arr, s_srv, s_pr, s_res = ss.spawn(4)
 
-        self.global_params.seed_arrivals  = int(s_arr.generate_state(1)[0])
-        self.global_params.seed_service   = int(s_srv.generate_state(1)[0])
-        self.global_params.seed_probs     = int(s_pr.generate_state(1)[0])
+        self.global_params.seed_arrivals = int(s_arr.generate_state(1)[0])
+        self.global_params.seed_service = int(s_srv.generate_state(1)[0])
+        self.global_params.seed_probs = int(s_pr.generate_state(1)[0])
         self.global_params.seed_resources = int(s_res.generate_state(1)[0])
 
         self.seed_manifest.append({
             "run_number": run_idx,
-            "seed_arrivals":  self.global_params.seed_arrivals,
-            "seed_service":   self.global_params.seed_service,
-            "seed_probs":     self.global_params.seed_probs,
+            "seed_arrivals": self.global_params.seed_arrivals,
+            "seed_service": self.global_params.seed_service,
+            "seed_probs": self.global_params.seed_probs,
             "seed_resources": self.global_params.seed_resources,
         })
 
@@ -95,18 +95,24 @@ class AltTrial:
         Run N simulations.
 
         dt_threshold:
-          If provided, sets global_params.direct_triage_threshold for this batch.
-          If None, AltModel will use whatever is already on global_params.
+          Kept for compatibility with alt-1 runner signatures.
+          AltModel2 does not use direct triage threshold, so this is ignored unless your
+          wider code expects the attribute on global_params.
         """
+        # Compatibility only (harmless if present; unused by AltModel2)
         if dt_threshold is not None:
             self.global_params.direct_triage_threshold = float(dt_threshold)
 
         burn_in_time = self.global_params.burn_in_time
 
-        # Get scenario label exactly as AltModel will record it
-        tmp_model = AltModel(self.global_params, burn_in_time, run_number=0)
-        scenario_name = getattr(tmp_model, "_scenario_name", "alt")
-        label         = getattr(tmp_model, "_policy_label", "unlabelled")
+        # Get scenario label exactly as AltModel2 will record it
+        tmp_model = AltModel2(self.global_params, burn_in_time, run_number=0)
+        scenario_name = getattr(tmp_model, "_scenario_name", "alt_2")
+        label = getattr(tmp_model, "_policy_label", "unlabelled")
+
+        # Normalise folder name if model still uses "alt2"
+        if scenario_name == "alt2":
+            scenario_name = "alt_2"
 
         # Batch root for this set of runs
         scenario_dir = os.path.join(
@@ -121,13 +127,13 @@ class AltTrial:
 
         for i in range(run_number):
             run_idx = i + 1
-            print(f"[ALT] Run {run_idx}/{run_number} | scenario={scenario_name} | batch={self.batch_id}")
+            print(f"[ALT2] Run {run_idx}/{run_number} | scenario={scenario_name} | batch={self.batch_id}")
 
             # Per-run RNG seeds
             self._per_run_seeds(run_idx)
 
             # Build and run model
-            model = AltModel(self.global_params, burn_in_time, run_number=run_idx)
+            model = AltModel2(self.global_params, burn_in_time, run_number=run_idx)
             model.run()
 
             # Patient-level results (add Run Number, then aggregate)
@@ -141,7 +147,7 @@ class AltTrial:
             # Summaries — mirror Trial: buffer only 'complete' per-run
             complete = model.outcome_measures()
             if isinstance(complete, tuple):
-                # AltModel may return (hourly, daily, complete)
+                # AltModel2 may return (hourly, daily, complete)
                 complete = complete[-1]
             buf_complete.append(complete)
 
@@ -165,12 +171,11 @@ class AltTrial:
             )
 
             resmon = model.resource_monitoring_df.copy()
-            resmon["Run Number"] = run_idx 
+            resmon["Run Number"] = run_idx
             self.agg_resource_monitoring_df = pd.concat(
                 [self.agg_resource_monitoring_df, resmon],
                 ignore_index=True
             )
-
 
             amu_q = model.amu_queue_df.copy()
             amu_q["Run Number"] = run_idx
@@ -178,7 +183,7 @@ class AltTrial:
 
             if progress_bar:
                 pct = int(run_idx / run_number * 100)
-                progress_bar.progress(pct, text=f"[ALT] Running simulation... {pct}%")
+                progress_bar.progress(pct, text=f"[ALT2] Running simulation... {pct}%")
 
         # Build complete summary across runs in one shot (mirror Trial)
         self.agg_results_complete = (
@@ -195,34 +200,34 @@ class AltTrial:
             )
 
         # --- Write ONE set of aggregated outputs for the whole batch ---
-        self.agg_results_df.to_csv(os.path.join(scenario_dir, "alt_results.csv"), index=False)
-        self.agg_event_log.to_csv(os.path.join(scenario_dir, "alt_event_log.csv"), index=False)
+        self.agg_results_df.to_csv(os.path.join(scenario_dir, "alt_2_results.csv"), index=False)
+        self.agg_event_log.to_csv(os.path.join(scenario_dir, "alt_2_event_log.csv"), index=False)
 
         # Mirror Trial naming for the complete summary
         self.agg_results_complete.to_csv(
-            os.path.join(scenario_dir, "alt_summary_complete_allruns.csv"), index=False
+            os.path.join(scenario_dir, "alt_2_summary_complete_allruns.csv"), index=False
         )
 
         self.agg_ed_assessment_queue_monitoring_df.to_csv(
-            os.path.join(scenario_dir, "alt_queue_ed_assessment.csv"), index=False
+            os.path.join(scenario_dir, "alt_2_queue_ed_assessment.csv"), index=False
         )
         self.agg_consultant_queue_monitoring_df.to_csv(
-            os.path.join(scenario_dir, "alt_queue_consultant.csv"), index=False
+            os.path.join(scenario_dir, "alt_2_queue_consultant.csv"), index=False
         )
         self.agg_medical_queue_monitoring_df.to_csv(
-            os.path.join(scenario_dir, "alt_queue_medical.csv"), index=False
+            os.path.join(scenario_dir, "alt_2_queue_medical.csv"), index=False
         )
         self.agg_amu_queue_df.to_csv(
-            os.path.join(scenario_dir, "alt_queue_amu.csv"), index=False
+            os.path.join(scenario_dir, "alt_2_queue_amu.csv"), index=False
         )
 
         self.agg_resource_monitoring_df.to_csv(
-                    os.path.join(scenario_dir, "alt_resource_monitor.csv"),
-                    index=False
+            os.path.join(scenario_dir, "alt_2_resource_monitor.csv"),
+            index=False
         )
 
         pd.DataFrame(self.seed_manifest).to_csv(
-            os.path.join(scenario_dir, "alt_seed_manifest.csv"), index=False
+            os.path.join(scenario_dir, "alt_2_seed_manifest.csv"), index=False
         )
 
         # Return handles if you want to inspect programmatically
@@ -234,6 +239,8 @@ class AltTrial:
             "daily": self.agg_results_daily,        # empty (parity with Trial)
             "complete": self.agg_results_complete,
             "queue_ed": self.agg_ed_assessment_queue_monitoring_df,
+            "queue_medical": self.agg_medical_queue_monitoring_df,
             "queue_consultant": self.agg_consultant_queue_monitoring_df,
             "queue_amu": self.agg_amu_queue_df,
+            "resource_monitor": self.agg_resource_monitoring_df,
         }

@@ -1,192 +1,54 @@
 # run.py
 
+MODEL_VARIANT = "baseline"   # "baseline", "alt_1", "alt_2"
 
-USE_ALT_MODEL = True # Set to False to use the original model
-
-if USE_ALT_MODEL:
-    from src.trial_alt import AltTrial as Trial
-    print("Running simulation with AltModel logic.")
-else:
+if MODEL_VARIANT == "baseline":
     from src.trial import Trial
     print("Running simulation with original model logic.")
+elif MODEL_VARIANT == "alt_1":
+    from src.trial_alt import AltTrial as Trial
+    print("Running simulation with Alt-1 logic.")
+elif MODEL_VARIANT == "alt_2":
+    from src.trial_alt2 import AltTrial2 as Trial
+    print("Running simulation with Alt-2 logic.")
+else:
+    raise ValueError(f"Unknown MODEL_VARIANT: {MODEL_VARIANT}")
 
-# Import 
 
+# Imports
 import os
 import time
 from datetime import datetime
-import numpy as np
-import pandas as pd
 from os.path import basename
 
-
-# Import helpers
-
-from src.global_parameters import GlobalParameters
-from src.model import Model
-from src.helper import rota_peak, save_rota_check, save_params
-
-# --- Calculate peak capacity first ---
-
-shift_patterns_weekday = [
-    # Tier 1 Resident
-    {"role": "tier_1", "shift_name": "Early",     "start": "08:00", "end": "16:00", "count": 8, "breaks": 1},
-    {"role": "tier_1", "shift_name": "Middle_1",  "start": "12:00", "end": "22:00", "count": 4, "breaks": 2},
-    {"role": "tier_1", "shift_name": "Twilight",  "start": "16:00", "end": "00:00", "count": 5, "breaks": 1},
-    {"role": "tier_1", "shift_name": "Night",     "start": "22:00", "end": "08:00", "count": 3, "breaks": 2},
-
-    # Tier 2 Resident
-    {"role": "tier_2", "shift_name": "Early",     "start": "08:00", "end": "16:00", "count": 4, "breaks": 1},
-    {"role": "tier_2", "shift_name": "Middle",    "start": "12:00", "end": "20:00", "count": 5, "breaks": 1},
-    {"role": "tier_2", "shift_name": "Twilight",  "start": "16:00", "end": "00:00", "count": 3, "breaks": 1},
-    {"role": "tier_2", "shift_name": "Night",     "start": "22:00", "end": "08:00", "count": 3, "breaks": 2},
-
-    # GP
-    {"role": "GP",     "shift_name": "GP",        "start": "09:00", "end": "23:00", "count": 1, "breaks": 2},
-
-    # ACP
-    {"role": "ACP",    "shift_name": "Early",     "start": "09:00", "end": "17:00", "count": 2, "breaks": 1},
-    {"role": "ACP",    "shift_name": "Late",      "start": "15:00", "end": "22:00", "count": 1, "breaks": 1},
-
-]
-
-# Weekend shift pattern — tuned to approximate your hourly means
-# (Night ~7; 09–11 ~12–13; 12–15 ~16–18; 16–19 ~15–18; 21–23 ~13–15)
-
-shift_patterns_weekend = [
-    # --- Tier 1 Resident ---
-    {"role": "tier_1", "shift_name": "Early",     "start": "08:00", "end": "16:15", "count": 7, "breaks": 1},
-    {"role": "tier_1", "shift_name": "Middle_1",  "start": "12:00", "end": "22:00", "count": 5, "breaks": 2},
-    {"role": "tier_1", "shift_name": "Twilight",  "start": "16:00", "end": "00:00", "count": 4, "breaks": 1},
-    {"role": "tier_1", "shift_name": "Night",     "start": "22:00", "end": "08:00", "count": 4, "breaks": 2},
-
-    # --- Tier 2 Resident ---
-    {"role": "tier_2", "shift_name": "Early",     "start": "08:00", "end": "16:15", "count": 3, "breaks": 1},
-    {"role": "tier_2", "shift_name": "Middle",    "start": "12:00", "end": "20:00", "count": 2, "breaks": 1},  # ends 20:00 (helps taper)
-    {"role": "tier_2", "shift_name": "Twilight",  "start": "16:00", "end": "00:00", "count": 2, "breaks": 1},
-    {"role": "tier_2", "shift_name": "Night",     "start": "22:00", "end": "08:00", "count": 3, "breaks": 2},
-
-    # --- GP & ACP (keep 1 each as per your current rota) ---
-    {"role": "GP",     "shift_name": "GP",        "start": "09:00", "end": "23:00", "count": 1, "breaks": 2},
-    {"role": "ACP",    "shift_name": "Early",     "start": "09:00", "end": "17:00", "count": 1, "breaks": 1},
-    {"role": "ACP",    "shift_name": "Late",      "start": "15:00", "end": "22:00", "count": 1, "breaks": 1},
-]
-global_params = GlobalParameters(
-
-    ambulance_proportion = 0.2,
-    walk_in_proportion = 0.8,
-
-    # Source of referral
-    proportion_direct_primary_care = 0.01,  
-    
-    # Patient characterstics 
-    
-    ambulance_acuity_probabilities = {
-    1: 0.02,    
-    2: 0.40,  
-    3: 0.50,     
-    4: 0.05,
-    5: 0.01,
-    },  
-
-    walk_in_acuity_probabilities = {
-    1: 0.05,    
-    2: 0.05,  
-    3: 0.40,     
-    4: 0.30,
-    5: 0.20,
-    },  
-
-    # Staffing resource
-    ambulance_triage_nurse_capacity = 1,
-    walk_in_triage_nurse_capacity = 3,
-
-    medical_doctor_capacity = 5,
-    consultant_capacity = 1, 
-    shift_patterns_weekday = shift_patterns_weekday,
-    shift_patterns_weekend = shift_patterns_weekend,
-
-    # SDEC capacity
-    sdec_open_hour = 7, 
-    sdec_close_hour = 18,
-
-    weekday_sdec_base_capacity = 6,
-    weekend_sdec_base_capacity = 5, 
-
-    # AMU capacity
-    max_amu_available_beds = 56,
-    amu_queue_soft = 10,
-    amu_queue_hard =  25,
-    amu_surge_max_scale = 1.10,
-    max_sdec_capacity = 5,
-
-    # Service times
-    mu_triage_assessment_time = 1.0,
-    sigma_triage_assessment_time = 0.7,
-
-    mu_ed_service_time = 4.00, 
-    sigma_ed_service_time = 0.45, 
-
-    mu_ed_decision_time = 4.20, 
-    sigma_ed_decision_time = 0.95, 
-    joint_gamma = 0.5,
-
-    # Params to emulate the 240 min breach boudnary 
-
-    decision_hazard_strength_240  = 0.175,
-    adjustment_start = 240,
-    adjustment_end = 300, 
-
-    mu_medical_service_time = 4.35,
-    sigma_medical_service_time = 0.55,
-
-    mu_consultant_assessment_time = 2.95,
-    sigma_consultant_assessment_time = 0.30, 
-
-    # Routing logic
-
-    sdec_prob_threshold = 0.10,
-    paediatric_referral_rate = 0.10,
-    prob_referral_to_medicine_adult = 0.525, 
-    
-    initial_medicine_discharge_prob = 0.00,
-    consultant_discharge_prob = 0.20,
-      
-    mu_surgical_bed_delay = 5.20,
-    sigma_surgical_bed_delay = 1.00,
-
-    # Routing / scenario analysis
-    direct_triage_threshold = None,  # None = no direct triage rule applied
-
-    # Simulation
-
-    simulation_time = 56160,
-    cool_down_time = 2880,
-    burn_in_time = 10080)  # burn in to prevent initiation bias 
+# Import shared setup + helpers
+from src.base_params import (
+    build_global_params,
+    apply_alt2_defaults,
+    MASTER_SEED,
+    shift_patterns_weekday,
+    shift_patterns_weekend,
+)
+from src.helper import save_rota_check, save_params
 
 
-# Scenario / sensitivity settings – set in run, not baked into GlobalParameters constructor
-global_params.referral_sensitivity_on = True
-global_params.referral_odds_multiplier = 1.90
-global_params.scenario_name = None
+# Build shared global parameters
+global_params = build_global_params()
 
+# Apply alt_2-specific staffing defaults when needed
+if MODEL_VARIANT == "alt_2":
+    global_params = apply_alt2_defaults(global_params)
 
-global_params.max_ed_doctor_capacity = max(
-    rota_peak(shift_patterns_weekday),
-    rota_peak(shift_patterns_weekend), 
-    ) + 2
-
-MASTER_SEED = 20251001   # Master SEED for all process RNGs
 
 if __name__ == "__main__":
-    trial = Trial(global_params, MASTER_SEED) 
+    trial = Trial(global_params, MASTER_SEED)
+
     t0 = time.perf_counter()
-    info = trial.run(run_number=20)
+    info = trial.run(run_number=50)
     elapsed = time.perf_counter() - t0
-    
-    # Create folder for each batch           
-    # --- Create folder for each batch and include ED service parameters ---
-    mu  = global_params.mu_ed_service_time
+
+    # Create folder for each batch and include ED service parameters
+    mu = global_params.mu_ed_service_time
     sigma = global_params.sigma_ed_service_time
     mu_dec = global_params.mu_ed_decision_time
     sigma_dec = global_params.sigma_ed_decision_time
@@ -195,22 +57,22 @@ if __name__ == "__main__":
     batch_dir = os.path.join(info["scenario_dir"], batch_label)
     os.makedirs(batch_dir, exist_ok=True)
 
-    # --- Print a quick summary to console ---
-    total_runs = info.get("total_runs", 20)   # fallback to what you passed in
+    # Print a quick summary to console
+    total_runs = info.get("total_runs", 50)
     secs_per_run = elapsed / max(1, total_runs)
+
     print(
         f" Runtime: {elapsed:,.1f}s "
         f"({secs_per_run:.2f}s/run across {total_runs} runs)  "
         f"[seed={MASTER_SEED}]"
     )
 
-    # --- Save params (JSON) ---
-
+    # Save params (JSON)
     params_filename = f"{basename(batch_dir)}.json"
     save_params(
         global_params,
         batch_dir,
-        filename=params_filename,  # <- fixed typo
+        filename=params_filename,
         extra={
             "master_seed": MASTER_SEED,
             "created": datetime.now().isoformat(timespec="seconds"),
@@ -228,19 +90,23 @@ if __name__ == "__main__":
                 "cool_down_time": global_params.cool_down_time,
                 "simulation_time": global_params.simulation_time,
             },
+            "model_variant": MODEL_VARIANT,
         },
     )
 
-    # --- Timings log (you were missing these two lines) ---
+    # Timings log
     timings_path = os.path.join(batch_dir, "timings.csv")
     header_needed = not os.path.exists(timings_path)
 
-
     with open(timings_path, "a", encoding="utf-8") as f:
         if header_needed:
-            f.write("timestamp,master_seed,total_runs,elapsed_seconds,seconds_per_run,burn_in,cool_down,sim_time\n")
+            f.write(
+                "timestamp,model_variant,master_seed,total_runs,"
+                "elapsed_seconds,seconds_per_run,burn_in,cool_down,sim_time\n"
+            )
         f.write(
             f"{datetime.now().isoformat(timespec='seconds')},"
+            f"{MODEL_VARIANT},"
             f"{MASTER_SEED},"
             f"{total_runs},"
             f"{elapsed:.3f},"
@@ -250,7 +116,6 @@ if __name__ == "__main__":
             f"{global_params.simulation_time}\n"
         )
 
-    # Save rota checks into the *batch* folder
+    # Save rota checks into the batch folder
     save_rota_check(shift_patterns_weekday, batch_dir, filename="rota_weekday.csv")
     save_rota_check(shift_patterns_weekend, batch_dir, filename="rota_weekend.csv")
-

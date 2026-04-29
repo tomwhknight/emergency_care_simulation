@@ -1,6 +1,7 @@
 # src/model_alt.py
 import numpy as np
 import pandas as pd
+from src.patient import Patient
 from src.model import Model
 from src.helper import extract_hour
 from src.helper import exp_rv, wchoice, bern 
@@ -62,26 +63,41 @@ class AltModel(Model):
         self.record_result(patient.id, "DT Threshold", self._dt_threshold)
 
         if eligible:
-            self.record_result(patient.id, "Pathway Start", "Direct-Medicine")
-            self.record_result(patient.id, "ED Pathway Subtype", "Direct—Medicine")
-            self.record_result(patient.id, "DT Block Reason", np.nan)
-            return self.env.process(self.direct_triage_to_medicine(patient))
-        else:
-            # --- CHANGED: clearer block reason so you can audit what stopped DT ---
-            if not intent_med:
-                reason = "Not Medicine subset"
-            elif not (news_ok and acuity_ok):
-                reason = "Clinical screen"
-            elif np.isfinite(th) and not (patient.referral_score_raw >= th):
-                reason = "Score<threshold"
-            else:
-                reason = "Other"
+            p_uptake = float(getattr(self.global_params, "direct_medicine_uptake_prob", 1.0))
+            p_uptake = max(0.0, min(1.0, p_uptake))
+
+            take_direct = bern(p_uptake, self.rng_probs)
+
+            if take_direct:
+                self.record_result(patient.id, "Pathway Start", "Direct-Medicine")
+                self.record_result(patient.id, "ED Pathway Subtype", "Direct—Medicine")
+                self.record_result(patient.id, "DT Block Reason", np.nan)
+                return self.env.process(self.direct_triage_to_medicine(patient))
+
+            # Eligible, but not taken up -> send through ED (referral volumes stay the same)
             self.record_result(patient.id, "Pathway Start", "ED")
             self.record_result(patient.id, "ED Pathway Subtype", "ED—Medicine")
-            self.record_result(patient.id, "DT Block Reason", reason)
+            self.record_result(patient.id, "DT Block Reason", "Uptake")
+            self.record_event(patient, "direct_triage_uptake_blocked")
             return self.env.process(self.ed_assessment(patient))
 
+        if not intent_med:
+            reason = "Not Medicine subset"
+            subtype = "ED—Other"
+        elif not (news_ok and acuity_ok):
+            reason = "Clinical screen"
+            subtype = "ED—Medicine"
+        elif np.isfinite(th) and not (patient.referral_score_raw >= th):
+            reason = "Score<threshold"
+            subtype = "ED—Medicine"
+        else:
+            reason = "Not eligible"
+            subtype = "ED—Medicine"
 
+        self.record_result(patient.id, "Pathway Start", "ED")
+        self.record_result(patient.id, "ED Pathway Subtype", subtype)
+        self.record_result(patient.id, "DT Block Reason", reason)
+        return self.env.process(self.ed_assessment(patient))
 
     def direct_triage_to_medicine(self, patient):
         """Bypass ED assessment—refer straight to Medicine (SDEC already rejected)."""

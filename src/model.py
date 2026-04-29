@@ -326,7 +326,6 @@ class Model:
             else:
                 priority = 1  # Lower priority
 
-        
             # Create instance of patient class
             
             patient = Patient(
