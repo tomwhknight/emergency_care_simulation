@@ -34,13 +34,7 @@ if "all_summary_results" not in st.session_state:
 # App banner
 # =====================================================
 
-col1, col2, col3 = st.columns([0.5, 2, 0.5])
-
-with col1:
-    st.image("assets/uom.jpeg")
-
-with col3:
-    st.image("assets/mft.png")
+st.image("assets/uom.jpeg", width=120)
 
 # =====================================================
 # Fixed simulation settings
