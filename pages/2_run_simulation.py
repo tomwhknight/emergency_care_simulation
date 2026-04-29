@@ -34,7 +34,7 @@ if "all_summary_results" not in st.session_state:
 # App banner
 # =====================================================
 
-col1, col2, col3 = st.columns([1.0, 2, 1.0])
+col1, col2, col3 = st.columns([0.5, 2, 0.5])
 
 with col1:
     st.image("assets/uom.jpeg")
