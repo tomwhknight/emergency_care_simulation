@@ -242,7 +242,7 @@ else:
 col1, col2, col3 = st.columns([1.25, 2, 1.25])
 
 with col1:
-    st.image("assets/uom.png")
+    st.image("assets/uom.jpeg")
 with col3:
     st.image("assets/mft.png")
 
