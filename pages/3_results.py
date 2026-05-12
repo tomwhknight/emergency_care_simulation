@@ -195,6 +195,52 @@ def plot_hourly_mean(patient_df, outcome_column, hour_column, run_column, title)
     st.plotly_chart(fig, use_container_width=True)
 
 
+def plot_three_metric_row(plot_func, df, title_prefix=""):
+    """Plot the three main outcomes in a consistent three-column row."""
+    cols = st.columns(3)
+
+    metrics = [
+        ("Time in System", "time in ED/system"),
+        ("Arrival to ED Assessment", "time to ED assessment"),
+        (consultant_column, "time to consultant assessment"),
+    ]
+
+    for col, (metric, label) in zip(cols, metrics):
+        with col:
+            if metric is not None:
+                plot_func(
+                    df,
+                    metric,
+                    f"{title_prefix}{label}",
+                )
+            else:
+                st.info("Consultant assessment time column not found.")
+
+
+def plot_three_hourly_metric_row(df, hour_column, run_column):
+    """Plot the three hourly outcome trends in a consistent three-column row."""
+    cols = st.columns(3)
+
+    metrics = [
+        ("Time in System", "Mean time in ED/system by hour of arrival"),
+        ("Arrival to ED Assessment", "Mean time to ED assessment by hour of arrival"),
+        (consultant_column, "Mean time to consultant assessment by hour of arrival"),
+    ]
+
+    for col, (metric, title) in zip(cols, metrics):
+        with col:
+            if metric is not None:
+                plot_hourly_mean(
+                    df,
+                    metric,
+                    hour_column,
+                    run_column,
+                    title,
+                )
+            else:
+                st.info("Consultant assessment time column not found.")
+
+
 # =====================================================
 # Identify key columns
 # =====================================================
@@ -243,13 +289,15 @@ col1, col2, col3 = st.columns([1.25, 2, 1.25])
 
 with col1:
     st.image("assets/uom.jpeg")
+
+with col2:
+    st.markdown(
+        "<h1 style='text-align: center;'>Simulation Results</h1>",
+        unsafe_allow_html=True,
+    )
+
 with col3:
     st.image("assets/mft.png")
-
-st.markdown(
-    "<h1 style='text-align: center;'>Simulation Results</h1>",
-    unsafe_allow_html=True,
-)
 
 st.markdown("---")
 
@@ -259,40 +307,17 @@ st.markdown("---")
 # =====================================================
 
 st.subheader("Headline outcomes")
-st.caption(
-    "These plots show the mean of each run first, then average those run-level means across runs. "
-    "Error bars show the standard deviation across runs."
-)
 
 if average_across_runs is None:
     st.warning(
         "Could not calculate mean across runs because no run number column was found in the patient-level results."
     )
 else:
-    col1, col2 = st.columns(2)
-
-    with col1:
-        plot_mean_across_runs(
-            average_across_runs,
-            "Time in System",
-            "Mean time in ED/system by scenario",
-        )
-
-    with col2:
-        plot_mean_across_runs(
-            average_across_runs,
-            "Arrival to ED Assessment",
-            "Mean time to ED assessment by scenario",
-        )
-
-    if consultant_column is not None:
-        plot_mean_across_runs(
-            average_across_runs,
-            consultant_column,
-            "Mean time to consultant assessment by scenario",
-        )
-    else:
-        st.info("Consultant assessment time column not found in the patient-level results.")
+    plot_three_metric_row(
+        plot_mean_across_runs,
+        average_across_runs,
+        title_prefix="Mean ",
+    )
 
 
 # =====================================================
@@ -300,33 +325,12 @@ else:
 # =====================================================
 
 st.subheader("Patient-level distributions")
-st.caption(
-    "These plots show the spread of individual patient outcomes pooled across runs. "
-    "They are useful for understanding variation and long waits, but are not the primary scenario comparison."
+
+plot_three_metric_row(
+    plot_patient_distribution,
+    patient_df,
+    title_prefix="Patient-level ",
 )
-
-col1, col2 = st.columns(2)
-
-with col1:
-    plot_patient_distribution(
-        patient_df,
-        "Time in System",
-        "Patient-level time in ED/system by scenario",
-    )
-
-with col2:
-    plot_patient_distribution(
-        patient_df,
-        "Arrival to ED Assessment",
-        "Patient-level time to ED assessment by scenario",
-    )
-
-if consultant_column is not None:
-    plot_patient_distribution(
-        patient_df,
-        consultant_column,
-        "Patient-level time to consultant assessment by scenario",
-    )
 
 
 # =====================================================
@@ -340,31 +344,8 @@ if hour_column is None:
 elif run_column is None:
     st.info("Run number column not found, so hourly averages across runs cannot be calculated.")
 else:
-    col1, col2 = st.columns(2)
-
-    with col1:
-        plot_hourly_mean(
-            patient_df,
-            "Time in System",
-            hour_column,
-            run_column,
-            "Mean time in ED/system by hour of arrival",
-        )
-
-    with col2:
-        plot_hourly_mean(
-            patient_df,
-            "Arrival to ED Assessment",
-            hour_column,
-            run_column,
-            "Mean time to ED assessment by hour of arrival",
-        )
-
-    if consultant_column is not None:
-        plot_hourly_mean(
-            patient_df,
-            consultant_column,
-            hour_column,
-            run_column,
-            "Mean time to consultant assessment by hour of arrival",
-        )
+    plot_three_hourly_metric_row(
+        patient_df,
+        hour_column,
+        run_column,
+    )

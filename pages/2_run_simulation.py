@@ -40,10 +40,10 @@ st.image("assets/uom.jpeg", width=120)
 # Fixed simulation settings
 # =====================================================
 
-burn_in_days = 2
+burn_in_days = 0
 burn_in_time = burn_in_days * 1440
 
-simulation_days = 7
+simulation_days = 5
 user_simulation_time = simulation_days * 1440
 simulation_time = user_simulation_time + burn_in_time
 
@@ -141,17 +141,17 @@ if run_button:
     progress_bar = st.progress(0, text="Starting simulations...")
 
     baseline_trial = TrialStreamlit(global_params, MASTER_SEED)
-    baseline_trial.run(total_runs)
+    baseline_trial.run(total_runs, progress_bar=progress_bar)
 
-    progress_bar.progress(33, text="Baseline complete. Running direct to medicine scenario...")
+    progress_bar.progress(0, text="Starting direct to medicine scenario...")
 
     alt_trial = AltTrialStreamlit(global_params, MASTER_SEED)
-    alt_trial.run(total_runs)
+    alt_trial.run(total_runs, progress_bar=progress_bar)
 
-    progress_bar.progress(66, text="Direct to medicine complete. Running direct to consultant scenario...")
+    progress_bar.progress(0, text="Starting direct to consultant scenario...")
 
     alt2_trial = AltTrial2Streamlit(global_params, MASTER_SEED)
-    alt2_trial.run(total_runs)
+    alt2_trial.run(total_runs, progress_bar=progress_bar)
 
     progress_bar.progress(100, text="Combining results...")
 
